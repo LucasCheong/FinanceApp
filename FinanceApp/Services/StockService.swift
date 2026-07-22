@@ -27,30 +27,34 @@ final class StockService: ObservableObject {
             errorMessage = nil
         }
 
-        var results: [StockQuote] = []
-
         // 每批最多 5 個，避免請求過多
         let batches = stride(from: 0, to: stocks.count, by: 5).map {
             Array(stocks[$0..<min($0 + 5, stocks.count)])
         }
 
+        var results: [StockQuote] = []
+
         for batch in batches {
-            await withTaskGroup(of: StockQuote?.self) { group in
+            let batchResults = await withTaskGroup(of: StockQuote?.self) { group -> [StockQuote] in
                 for stock in batch {
                     group.addTask {
                         await self.fetchSingleQuote(for: stock)
                     }
                 }
+                var batchResults: [StockQuote] = []
                 for await quote in group {
                     if let quote = quote {
-                        results.append(quote)
+                        batchResults.append(quote)
                     }
                 }
+                return batchResults
             }
+            results.append(contentsOf: batchResults)
         }
 
+        let finalResults = results
         await MainActor.run {
-            self.quotes = results
+            self.quotes = finalResults
             self.isLoading = false
         }
     }
