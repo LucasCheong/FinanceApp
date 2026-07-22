@@ -260,9 +260,9 @@ struct InvoiceReviewView: View {
                 ForEach(Array(parsedInvoices.enumerated()), id: \.offset) { index, _ in
                     InvoiceReviewSection(
                         index: index,
-                        invoice: Binding(
-                            get: { parsedInvoices[index] },
-                            set: { parsedInvoices[index] = $0 }
+                        invoice: Binding<ParsedInvoiceData>(
+                            get: { self.parsedInvoices[index] },
+                            set: { self.parsedInvoices[index] = $0 }
                         )
                     )
                 }
