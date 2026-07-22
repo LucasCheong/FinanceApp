@@ -16,17 +16,43 @@ struct MarketDashboardView: View {
         case gainers = "最大漲幅"
         case losers = "最大跌幅"
         case highYield = "最高收息"
+        case etfReturns = "ETF年化回報"
     }
 
     var filteredStocks: [StockInfo] {
-        switch marketFilter {
-        case .all: return StockDatabase.allStocks
-        case .us: return StockDatabase.allUS
-        case .hk: return StockDatabase.allHK
+        switch selectedTab {
+        case .etfReturns:
+            return StockDatabase.mainstreamUSETFs
+        default:
+            switch marketFilter {
+            case .all: return StockDatabase.allStocks
+            case .us: return StockDatabase.allUS
+            case .hk: return StockDatabase.allHK
+            }
         }
     }
 
     var displayQuotes: [StockQuote] {
+        // ETF 年化回報標籤使用本地數據，不走網絡拉取
+        if selectedTab == .etfReturns {
+            return StockDatabase.mainstreamUSETFs
+                .sorted { $0.annualizedReturn > $1.annualizedReturn }
+                .map { stock in
+                    StockQuote(
+                        symbol: stock.symbol,
+                        name: stock.name,
+                        market: stock.market.rawValue,
+                        currentPrice: 0,
+                        previousClose: 0,
+                        change: 0,
+                        changePercent: 0,
+                        dividendYield: stock.dividendYield,
+                        currency: "USD",
+                        exchange: "ETF"
+                    )
+                }
+        }
+
         let filtered = stockService.quotes.filter { quote in
             switch marketFilter {
             case .all: return true
@@ -48,20 +74,24 @@ struct MarketDashboardView: View {
             return filtered
                 .filter { $0.dividendYield > 0 }
                 .sorted { $0.dividendYield > $1.dividendYield }
+        case .etfReturns:
+            return []  // 已在上面處理
         }
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // 市場篩選
-                marketFilterPicker
+                // 市場篩選（ETF年化回報標籤隱藏市場篩選）
+                if selectedTab != .etfReturns {
+                    marketFilterPicker
+                }
 
                 // 標籤切換
                 tabPicker
 
                 // 內容
-                if stockService.isLoading {
+                if selectedTab != .etfReturns && stockService.isLoading {
                     loadingView
                 } else if displayQuotes.isEmpty {
                     emptyView
@@ -72,16 +102,23 @@ struct MarketDashboardView: View {
             .navigationTitle("市場看板")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await refreshData() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    if selectedTab != .etfReturns {
+                        Button {
+                            Task { await refreshData() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                 }
             }
             .task {
-                if stockService.quotes.isEmpty {
+                if selectedTab != .etfReturns && stockService.quotes.isEmpty {
                     await refreshData()
+                }
+            }
+            .onChange(of: selectedTab) { newTab in
+                if newTab != .etfReturns && stockService.quotes.isEmpty {
+                    Task { await refreshData() }
                 }
             }
         }
@@ -113,15 +150,43 @@ struct MarketDashboardView: View {
         .padding(.bottom, 8)
     }
 
-    // MARK: - 股票列表
-    private var quotesList: some View {
+    // MARK: - ETF 年化回報列表
+    private var etfReturnsList: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
+                // 說明卡片
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("美股主流 ETF 年化回報率排列", systemImage: "chart.bar.fill")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.financePrimary)
+                    Text("基於5年年化回報率，包含大盤、行業板塊、成長/價值、債券、商品等主流 ETF")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
+
                 ForEach(Array(displayQuotes.enumerated()), id: \.element.id) { index, quote in
-                    MarketQuoteRow(quote: quote, rank: index + 1, tab: selectedTab)
+                    ETFReturnRow(quote: quote, rank: index + 1)
                 }
             }
             .padding()
+        }
+    }
+
+    // MARK: - 股票列表
+    private var quotesList: some View {
+        if selectedTab == .etfReturns {
+            etfReturnsList
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(displayQuotes.enumerated()), id: \.element.id) { index, quote in
+                        MarketQuoteRow(quote: quote, rank: index + 1, tab: selectedTab)
+                    }
+                }
+                .padding()
+            }
         }
     }
 
@@ -154,6 +219,7 @@ struct MarketDashboardView: View {
 
     // MARK: - 刷新數據
     private func refreshData() async {
+        guard selectedTab != .etfReturns else { return }
         await stockService.fetchQuotes(for: filteredStocks)
     }
 }
@@ -209,6 +275,9 @@ struct MarketQuoteRow: View {
                     Text("年息率")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+
+                case .etfReturns:
+                    EmptyView()
                 }
             }
         }
@@ -222,6 +291,109 @@ struct MarketQuoteRow: View {
                     Color.changeColor(quote.changePercent).opacity(0.15),
                     lineWidth: 1
                 )
+        )
+    }
+}
+
+// MARK: - ETF 年化回報行視圖
+struct ETFReturnRow: View {
+    let quote: StockQuote
+    let rank: Int
+
+    // 從 StockDatabase 查找對應的 annualizedReturn
+    private var annualizedReturn: Double {
+        StockDatabase.mainstreamUSETFs.first { $0.symbol == quote.symbol }?.annualizedReturn ?? 0
+    }
+
+    // 根據回報率決定顏色和圖標
+    private var returnColor: Color {
+        if annualizedReturn >= 0.15 { return .green }
+        else if annualizedReturn >= 0.10 { return .financePrimary }
+        else if annualizedReturn >= 0.05 { return .blue }
+        else if annualizedReturn >= 0.0 { return .orange }
+        else { return .red }
+    }
+
+    private var returnIcon: String {
+        if annualizedReturn >= 0.15 { return "flame.fill" }
+        else if annualizedReturn >= 0.10 { return "arrow.up.right" }
+        else if annualizedReturn >= 0.05 { return "arrow.up" }
+        else if annualizedReturn >= 0.0 { return "minus" }
+        else { return "arrow.down" }
+    }
+
+    // 表現等級標籤
+    private var performanceLabel: String {
+        if annualizedReturn >= 0.15 { return "優秀" }
+        else if annualizedReturn >= 0.10 { return "良好" }
+        else if annualizedReturn >= 0.05 { return "一般" }
+        else if annualizedReturn >= 0.0 { return "偏低" }
+        else { return "虧損" }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // 排名
+            VStack(spacing: 2) {
+                Text("#\(rank)")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(returnColor)
+                if rank <= 3 {
+                    Image(systemName: "medal.fill")
+                        .font(.caption2)
+                        .foregroundStyle(rank == 1 ? .yellow : rank == 2 ? .gray : .orange)
+                }
+            }
+            .frame(width: 36)
+
+            // ETF 信息
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(quote.symbol)
+                        .font(.subheadline.bold())
+                    Text("🇺🇸")
+                        .font(.caption)
+                    Text(performanceLabel)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(returnColor.opacity(0.15))
+                        .foregroundStyle(returnColor)
+                        .cornerRadius(4)
+                }
+                Text(quote.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // 右側年化回報
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: returnIcon)
+                        .font(.caption)
+                    Text(String(format: "%.2f%%", annualizedReturn * 100))
+                        .font(.title3.bold())
+                }
+                .foregroundStyle(returnColor)
+
+                HStack(spacing: 8) {
+                    if quote.dividendYield > 0 {
+                        Label(String(format: "息 %.2f%%", quote.dividendYield * 100), systemImage: "percent")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.cardBackground)
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(returnColor.opacity(0.2), lineWidth: 1)
         )
     }
 }

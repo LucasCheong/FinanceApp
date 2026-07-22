@@ -28,21 +28,59 @@ struct StockDatabase {
 
     // MARK: - 美股高息ETF
     static let usETFs: [StockInfo] = [
-        StockInfo(symbol: "SCHD", name: "Schwab US Dividend ETF", market: .us, dividendYield: 0.0355),
-        StockInfo(symbol: "VYM", name: "Vanguard High Dividend ETF", market: .us, dividendYield: 0.0285),
-        StockInfo(symbol: "HDV", name: "iShares Core High Dividend ETF", market: .us, dividendYield: 0.0315),
-        StockInfo(symbol: "DVY", name: "iShares Select Dividend ETF", market: .us, dividendYield: 0.0325),
-        StockInfo(symbol: "VIG", name: "Vanguard Dividend Appreciation ETF", market: .us, dividendYield: 0.0175),
-        StockInfo(symbol: "JEPI", name: "JPM Equity Premium Income ETF", market: .us, dividendYield: 0.0725),
-        StockInfo(symbol: "JEPQ", name: "JPM Nasdaq Equity Premium Income ETF", market: .us, dividendYield: 0.0655),
-        StockInfo(symbol: "SCHG", name: "Schwab US Large-Cap Growth ETF", market: .us, dividendYield: 0.0045),
-        StockInfo(symbol: "QQQ", name: "Invesco QQQ Trust", market: .us, dividendYield: 0.0055),
-        StockInfo(symbol: "SPY", name: "SPDR S&P 500 ETF", market: .us, dividendYield: 0.0125),
-        StockInfo(symbol: "VTI", name: "Vanguard Total Stock Market ETF", market: .us, dividendYield: 0.0145),
-        StockInfo(symbol: "AGG", name: "iShares Core US Aggregate Bond ETF", market: .us, dividendYield: 0.0425),
-        StockInfo(symbol: "BND", name: "Vanguard Total Bond Market ETF", market: .us, dividendYield: 0.0415),
-        StockInfo(symbol: "PFF", name: "iShares Preferred Income Securities ETF", market: .us, dividendYield: 0.0565),
-        StockInfo(symbol: "O", name: "Realty Income Corp", market: .us, dividendYield: 0.0555),
+        StockInfo(symbol: "SCHD", name: "Schwab US Dividend ETF", market: .us, dividendYield: 0.0355, annualizedReturn: 0.125),
+        StockInfo(symbol: "VYM", name: "Vanguard High Dividend ETF", market: .us, dividendYield: 0.0285, annualizedReturn: 0.098),
+        StockInfo(symbol: "HDV", name: "iShares Core High Dividend ETF", market: .us, dividendYield: 0.0315, annualizedReturn: 0.095),
+        StockInfo(symbol: "DVY", name: "iShares Select Dividend ETF", market: .us, dividendYield: 0.0325, annualizedReturn: 0.092),
+        StockInfo(symbol: "VIG", name: "Vanguard Dividend Appreciation ETF", market: .us, dividendYield: 0.0175, annualizedReturn: 0.115),
+        StockInfo(symbol: "JEPI", name: "JPM Equity Premium Income ETF", market: .us, dividendYield: 0.0725, annualizedReturn: 0.085),
+        StockInfo(symbol: "JEPQ", name: "JPM Nasdaq Equity Premium Income ETF", market: .us, dividendYield: 0.0655, annualizedReturn: 0.105),
+        StockInfo(symbol: "SCHG", name: "Schwab US Large-Cap Growth ETF", market: .us, dividendYield: 0.0045, annualizedReturn: 0.152),
+        StockInfo(symbol: "QQQ", name: "Invesco QQQ Trust", market: .us, dividendYield: 0.0055, annualizedReturn: 0.185),
+        StockInfo(symbol: "SPY", name: "SPDR S&P 500 ETF", market: .us, dividendYield: 0.0125, annualizedReturn: 0.105),
+        StockInfo(symbol: "VTI", name: "Vanguard Total Stock Market ETF", market: .us, dividendYield: 0.0145, annualizedReturn: 0.102),
+        StockInfo(symbol: "AGG", name: "iShares Core US Aggregate Bond ETF", market: .us, dividendYield: 0.0425, annualizedReturn: 0.015),
+        StockInfo(symbol: "BND", name: "Vanguard Total Bond Market ETF", market: .us, dividendYield: 0.0415, annualizedReturn: 0.012),
+        StockInfo(symbol: "PFF", name: "iShares Preferred Income Securities ETF", market: .us, dividendYield: 0.0565, annualizedReturn: 0.035),
+        StockInfo(symbol: "O", name: "Realty Income Corp", market: .us, dividendYield: 0.0555, annualizedReturn: 0.068),
+    ]
+
+    // MARK: - 美股主流ETF（年化回報率排列專用）
+    static let mainstreamUSETFs: [StockInfo] = [
+        StockInfo(symbol: "SPY", name: "SPDR S&P 500 ETF", market: .us, dividendYield: 0.0125, annualizedReturn: 0.105),
+        StockInfo(symbol: "QQQ", name: "Invesco QQQ Trust (Nasdaq 100)", market: .us, dividendYield: 0.0055, annualizedReturn: 0.185),
+        StockInfo(symbol: "VTI", name: "Vanguard Total Stock Market ETF", market: .us, dividendYield: 0.0145, annualizedReturn: 0.102),
+        StockInfo(symbol: "VOO", name: "Vanguard S&P 500 ETF", market: .us, dividendYield: 0.0135, annualizedReturn: 0.105),
+        StockInfo(symbol: "VEA", name: "Vanguard Developed Markets ETF", market: .us, dividendYield: 0.0285, annualizedReturn: 0.065),
+        StockInfo(symbol: "VWO", name: "Vanguard Emerging Markets ETF", market: .us, dividendYield: 0.0295, annualizedReturn: 0.045),
+        StockInfo(symbol: "SCHD", name: "Schwab US Dividend ETF", market: .us, dividendYield: 0.0355, annualizedReturn: 0.125),
+        StockInfo(symbol: "VUG", name: "Vanguard Growth ETF", market: .us, dividendYield: 0.0065, annualizedReturn: 0.155),
+        StockInfo(symbol: "VTV", name: "Vanguard Value ETF", market: .us, dividendYield: 0.0245, annualizedReturn: 0.092),
+        StockInfo(symbol: "SCHG", name: "Schwab US Large-Cap Growth ETF", market: .us, dividendYield: 0.0045, annualizedReturn: 0.152),
+        StockInfo(symbol: "SCHV", name: "Schwab US Large-Cap Value ETF", market: .us, dividendYield: 0.0185, annualizedReturn: 0.098),
+        StockInfo(symbol: "IWM", name: "iShares Russell 2000 ETF", market: .us, dividendYield: 0.0115, annualizedReturn: 0.075),
+        StockInfo(symbol: "IWB", name: "iShares Russell 1000 ETF", market: .us, dividendYield: 0.0135, annualizedReturn: 0.100),
+        StockInfo(symbol: "MDY", name: "SPDR S&P MidCap 400 ETF", market: .us, dividendYield: 0.0135, annualizedReturn: 0.088),
+        StockInfo(symbol: "DIA", name: "SPDR Dow Jones Industrial ETF", market: .us, dividendYield: 0.0185, annualizedReturn: 0.095),
+        StockInfo(symbol: "XLK", name: "Technology Select Sector SPDR", market: .us, dividendYield: 0.0075, annualizedReturn: 0.165),
+        StockInfo(symbol: "XLV", name: "Health Care Select Sector SPDR", market: .us, dividendYield: 0.0155, annualizedReturn: 0.072),
+        StockInfo(symbol: "XLF", name: "Financial Select Sector SPDR", market: .us, dividendYield: 0.0185, annualizedReturn: 0.108),
+        StockInfo(symbol: "XLY", name: "Consumer Discretionary Select SPDR", market: .us, dividendYield: 0.0085, annualizedReturn: 0.118),
+        StockInfo(symbol: "XLP", name: "Consumer Staples Select Sector SPDR", market: .us, dividendYield: 0.0255, annualizedReturn: 0.075),
+        StockInfo(symbol: "XLE", name: "Energy Select Sector SPDR", market: .us, dividendYield: 0.0355, annualizedReturn: 0.082),
+        StockInfo(symbol: "XLI", name: "Industrial Select Sector SPDR", market: .us, dividendYield: 0.0155, annualizedReturn: 0.095),
+        StockInfo(symbol: "XLB", name: "Materials Select Sector SPDR", market: .us, dividendYield: 0.0185, annualizedReturn: 0.068),
+        StockInfo(symbol: "XLU", name: "Utilities Select Sector SPDR", market: .us, dividendYield: 0.0355, annualizedReturn: 0.055),
+        StockInfo(symbol: "XLRE", name: "Real Estate Select Sector SPDR", market: .us, dividendYield: 0.0385, annualizedReturn: 0.042),
+        StockInfo(symbol: "XLC", name: "Communication Services Select SPDR", market: .us, dividendYield: 0.0085, annualizedReturn: 0.092),
+        StockInfo(symbol: "ARKK", name: "ARK Innovation ETF", market: .us, dividendYield: 0.0, annualizedReturn: 0.025),
+        StockInfo(symbol: "JEPI", name: "JPM Equity Premium Income ETF", market: .us, dividendYield: 0.0725, annualizedReturn: 0.085),
+        StockInfo(symbol: "JEPQ", name: "JPM Nasdaq Equity Premium Income ETF", market: .us, dividendYield: 0.0655, annualizedReturn: 0.105),
+        StockInfo(symbol: "AGG", name: "iShares Core US Aggregate Bond ETF", market: .us, dividendYield: 0.0425, annualizedReturn: 0.015),
+        StockInfo(symbol: "BND", name: "Vanguard Total Bond Market ETF", market: .us, dividendYield: 0.0415, annualizedReturn: 0.012),
+        StockInfo(symbol: "TLT", name: "iShares 20+ Year Treasury Bond ETF", market: .us, dividendYield: 0.0385, annualizedReturn: 0.008),
+        StockInfo(symbol: "GLD", name: "SPDR Gold Shares", market: .us, dividendYield: 0.0, annualizedReturn: 0.085),
+        StockInfo(symbol: "VNQ", name: "Vanguard Real Estate ETF", market: .us, dividendYield: 0.0415, annualizedReturn: 0.058),
     ]
 
     // MARK: - 港股熱門股票
@@ -107,6 +145,15 @@ struct StockInfo: Identifiable {
     let name: String
     let market: StockHolding.StockMarket
     let dividendYield: Double
+    var annualizedReturn: Double  // 年化回報率（1Y/3Y/5Y等，預設為5年年化）
+
+    init(symbol: String, name: String, market: StockHolding.StockMarket, dividendYield: Double, annualizedReturn: Double = 0) {
+        self.symbol = symbol
+        self.name = name
+        self.market = market
+        self.dividendYield = dividendYield
+        self.annualizedReturn = annualizedReturn
+    }
 
     var displayName: String {
         "\(name) (\(symbol))"
