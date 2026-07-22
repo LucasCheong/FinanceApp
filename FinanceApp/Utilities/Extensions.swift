@@ -91,6 +91,18 @@ extension Color {
     }
 }
 
+// MARK: - ShapeStyle 擴展（讓 .foregroundStyle(.financePrimary) 等點語法可用）
+extension ShapeStyle where Self == Color {
+    static var gain: Color { .green }
+    static var loss: Color { .red }
+    static var neutral: Color { .gray }
+    static var financePrimary: Color { Color(red: 0.0, green: 0.5, blue: 0.8) }
+    static var financeSecondary: Color { Color(red: 0.2, green: 0.6, blue: 0.9) }
+    static var incomeColor: Color { .green }
+    static var expenseColor: Color { .orange }
+    static var cardBackground: Color { Color(.secondarySystemBackground) }
+}
+
 // MARK: - View 擴展
 extension View {
     /// 卡片樣式修飾符
