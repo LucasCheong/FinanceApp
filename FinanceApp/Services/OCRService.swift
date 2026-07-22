@@ -1,5 +1,5 @@
 import Foundation
-import Vision
+@preconcurrency import Vision
 import UIKit
 
 /// OCR 服務 - 使用 Apple Vision 框架識別發票文字
