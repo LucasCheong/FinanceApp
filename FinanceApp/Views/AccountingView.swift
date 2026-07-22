@@ -73,16 +73,20 @@ struct AccountingView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(persistence.cashBalance.currencyString())
+            Text(persistence.cashBalance.moneyString(currency: persistence.baseCurrency))
                 .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(persistence.cashBalance >= 0 ? .gain : .loss)
+
+            Text("基準幣種: \(persistence.baseCurrency.displayName)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             HStack(spacing: 32) {
                 VStack(alignment: .leading) {
                     Label("總收入", systemImage: "arrow.down.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(persistence.totalIncome.currencyString())
+                    Text(persistence.totalIncome.moneyString(currency: persistence.baseCurrency))
                         .font(.headline)
                         .foregroundStyle(.incomeColor)
                 }
@@ -91,7 +95,7 @@ struct AccountingView: View {
                     Label("總支出", systemImage: "arrow.up.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(persistence.totalExpense.currencyString())
+                    Text(persistence.totalExpense.moneyString(currency: persistence.baseCurrency))
                         .font(.headline)
                         .foregroundStyle(.expenseColor)
                 }
@@ -108,7 +112,7 @@ struct AccountingView: View {
                 Text("本月收入")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(persistence.transactions.monthlyIncome.currencyString())
+                Text(persistence.monthlyIncome.moneyString(currency: persistence.baseCurrency))
                     .font(.title3.bold())
                     .foregroundStyle(.incomeColor)
             }
@@ -119,7 +123,7 @@ struct AccountingView: View {
                 Text("本月支出")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(persistence.transactions.monthlyExpense.currencyString())
+                Text(persistence.monthlyExpense.moneyString(currency: persistence.baseCurrency))
                     .font(.title3.bold())
                     .foregroundStyle(.expenseColor)
             }
@@ -130,9 +134,9 @@ struct AccountingView: View {
                 Text("本月結餘")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(persistence.transactions.monthlyBalance.currencyString())
+                Text(persistence.monthlyBalance.moneyString(currency: persistence.baseCurrency))
                     .font(.title3.bold())
-                    .foregroundStyle(persistence.transactions.monthlyBalance >= 0 ? .gain : .loss)
+                    .foregroundStyle(persistence.monthlyBalance >= 0 ? .gain : .loss)
             }
         }
         .cardStyle()
@@ -222,7 +226,7 @@ struct TransactionRow: View {
             Spacer()
 
             // 金額
-            Text("\(transaction.type == .income ? "+" : "-")\(transaction.amount.currencyString())")
+            Text("\(transaction.type == .income ? "+" : "-")\(transaction.amount.moneyString(currency: transaction.currency))")
                 .font(.headline)
                 .foregroundStyle(transaction.type == .income ? .incomeColor : .expenseColor)
         }
@@ -243,6 +247,7 @@ struct AddTransactionView: View {
     @State private var category = ExpenseCategory.food.rawValue
     @State private var date = Date()
     @State private var note = ""
+    @State private var currency: Currency = .hkd
 
     var currentCategories: [String] {
         type == .income
@@ -269,6 +274,14 @@ struct AddTransactionView: View {
                     TextField("輸入金額", text: $amount)
                         .keyboardType(.decimalPad)
                         .font(.title3)
+                }
+
+                Section("幣種") {
+                    Picker("幣種", selection: $currency) {
+                        ForEach(Currency.allCases, id: \.self) { cur in
+                            Text(cur.displayName).tag(cur)
+                        }
+                    }
                 }
 
                 Section("類別") {
@@ -312,7 +325,8 @@ struct AddTransactionView: View {
             type: type,
             category: category,
             note: note,
-            source: .manual
+            source: .manual,
+            currency: currency
         )
 
         persistence.addTransaction(transaction)

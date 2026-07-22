@@ -193,6 +193,7 @@ struct InvoiceImportView: View {
                     imageData: imageData,
                     merchant: parsed.merchant,
                     amount: parsed.amount,
+                    currency: .hkd,
                     date: parsed.date,
                     items: parsed.items,
                     rawText: parsed.rawText
@@ -240,7 +241,7 @@ struct InvoiceRow: View {
 
             Spacer()
 
-            Text(invoice.amount.currencyString())
+            Text(invoice.amount.moneyString(currency: invoice.currency))
                 .font(.headline)
                 .foregroundStyle(.expenseColor)
         }
@@ -288,6 +289,7 @@ struct InvoiceReviewView: View {
                 date: invoiceData.date,
                 merchant: invoiceData.merchant,
                 amount: invoiceData.amount,
+                currency: invoiceData.currency,
                 items: invoiceData.items,
                 rawText: invoiceData.rawText,
                 imageData: invoiceData.imageData,
@@ -304,7 +306,8 @@ struct InvoiceReviewView: View {
                     type: .expense,
                     category: ExpenseCategory.other.rawValue,
                     note: "發票: \(invoiceData.merchant)",
-                    source: .invoice
+                    source: .invoice,
+                    currency: invoiceData.currency
                 )
                 persistence.addTransaction(transaction)
             }
@@ -326,6 +329,7 @@ struct InvoiceReviewSection: View {
             invoiceImage
             merchantField
             amountField
+            currencyField
             dateField
             itemsSection
             rawTextSection
@@ -355,6 +359,14 @@ struct InvoiceReviewSection: View {
             TextField("0", value: $invoice.amount, format: .number)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var currencyField: some View {
+        Picker("幣種", selection: $invoice.currency) {
+            ForEach(Currency.allCases, id: \.self) { cur in
+                Text(cur.displayName).tag(cur)
+            }
         }
     }
 
@@ -391,6 +403,7 @@ struct ParsedInvoiceData: Identifiable {
     var imageData: Data?
     var merchant: String
     var amount: Double
+    var currency: Currency
     var date: Date
     var items: [String]
     var rawText: String

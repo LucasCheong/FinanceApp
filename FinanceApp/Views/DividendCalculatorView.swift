@@ -5,21 +5,29 @@ struct DividendCalculatorView: View {
     @StateObject private var persistence = PersistenceService.shared
     @State private var showingAddPosition = false
 
-    // 總計
+    // 總計（以基準幣種結算）
     var totalDailyIncome: Double {
-        persistence.dividendPositions.reduce(0) { $0 + $1.dailyDividendIncome }
+        persistence.dividendPositions.reduce(0) { total, pos in
+            total + ExchangeRateProvider.convert(pos.dailyDividendIncome, from: pos.currency, to: persistence.baseCurrency)
+        }
     }
 
     var totalMonthlyIncome: Double {
-        persistence.dividendPositions.reduce(0) { $0 + $1.monthlyDividendIncome }
+        persistence.dividendPositions.reduce(0) { total, pos in
+            total + ExchangeRateProvider.convert(pos.monthlyDividendIncome, from: pos.currency, to: persistence.baseCurrency)
+        }
     }
 
     var totalAnnualIncome: Double {
-        persistence.dividendPositions.reduce(0) { $0 + $1.annualDividendIncome }
+        persistence.dividendPositions.reduce(0) { total, pos in
+            total + ExchangeRateProvider.convert(pos.annualDividendIncome, from: pos.currency, to: persistence.baseCurrency)
+        }
     }
 
     var totalInvestment: Double {
-        persistence.dividendPositions.reduce(0) { $0 + $1.totalInvestment }
+        persistence.dividendPositions.reduce(0) { total, pos in
+            total + ExchangeRateProvider.convert(pos.totalInvestment, from: pos.currency, to: persistence.baseCurrency)
+        }
     }
 
     var averageYield: Double {
@@ -70,7 +78,7 @@ struct DividendCalculatorView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(totalAnnualIncome.currencyString())
+            Text(totalAnnualIncome.moneyString(currency: persistence.baseCurrency))
                 .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(.financePrimary)
 
@@ -85,7 +93,7 @@ struct DividendCalculatorView: View {
             HStack {
                 Label("總投資額", systemImage: "dollarsign.circle")
                     .font(.caption)
-                Text(totalInvestment.currencyString())
+                Text(totalInvestment.moneyString(currency: persistence.baseCurrency))
                     .font(.caption.bold())
             }
         }
@@ -104,6 +112,7 @@ struct DividendCalculatorView: View {
                 IncomeBreakdownItem(
                     title: "每日",
                     amount: totalDailyIncome,
+                    currency: persistence.baseCurrency,
                     icon: "sun.max",
                     color: .orange
                 )
@@ -111,6 +120,7 @@ struct DividendCalculatorView: View {
                 IncomeBreakdownItem(
                     title: "每月",
                     amount: totalMonthlyIncome,
+                    currency: persistence.baseCurrency,
                     icon: "moon",
                     color: .blue
                 )
@@ -118,6 +128,7 @@ struct DividendCalculatorView: View {
                 IncomeBreakdownItem(
                     title: "每年",
                     amount: totalAnnualIncome,
+                    currency: persistence.baseCurrency,
                     icon: "calendar",
                     color: .green
                 )
@@ -160,6 +171,7 @@ struct DividendCalculatorView: View {
 struct IncomeBreakdownItem: View {
     let title: String
     let amount: Double
+    let currency: Currency
     let icon: String
     let color: Color
 
@@ -173,7 +185,7 @@ struct IncomeBreakdownItem: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Text(amount.currencyString())
+            Text(amount.moneyString(currency: currency))
                 .font(.subheadline.bold())
         }
         .frame(maxWidth: .infinity)
@@ -219,7 +231,7 @@ struct DividendPositionRow: View {
                     Text("\(position.shares) 股 @ \(position.purchasePrice.compactString())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("投資: \(position.totalInvestment.currencyString())")
+                    Text("投資: \(position.totalInvestment.moneyString(currency: position.currency))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -231,7 +243,7 @@ struct DividendPositionRow: View {
                         Text("日")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Text(position.dailyDividendIncome.currencyString())
+                        Text(position.dailyDividendIncome.moneyString(currency: position.currency))
                             .font(.caption.bold())
                             .foregroundStyle(.orange)
                     }
@@ -240,7 +252,7 @@ struct DividendPositionRow: View {
                         Text("月")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Text(position.monthlyDividendIncome.currencyString())
+                        Text(position.monthlyDividendIncome.moneyString(currency: position.currency))
                             .font(.caption.bold())
                             .foregroundStyle(.blue)
                     }
@@ -249,7 +261,7 @@ struct DividendPositionRow: View {
                         Text("年")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Text(position.annualDividendIncome.currencyString())
+                        Text(position.annualDividendIncome.moneyString(currency: position.currency))
                             .font(.caption.bold())
                             .foregroundStyle(.green)
                     }
@@ -280,6 +292,7 @@ struct AddDividendPositionView: View {
     @State private var isCustom = false
     @State private var customSymbol = ""
     @State private var customName = ""
+    @State private var currency: Currency = .hkd
 
     var searchResults: [StockInfo] {
         if searchText.isEmpty {
@@ -355,6 +368,12 @@ struct AddDividendPositionView: View {
                         Text("季度 (4次)").tag(4)
                         Text("月度 (12次)").tag(12)
                     }
+
+                    Picker("結算幣種", selection: $currency) {
+                        ForEach(Currency.allCases, id: \.self) { cur in
+                            Text(cur.displayName).tag(cur)
+                        }
+                    }
                 }
 
                 // 預覽
@@ -363,19 +382,19 @@ struct AddDividendPositionView: View {
                         HStack {
                             Label("每日", systemImage: "sun.max")
                             Spacer()
-                            Text(previewIncome.daily.currencyString())
+                            Text(previewIncome.daily.moneyString(currency: currency))
                                 .foregroundStyle(.orange)
                         }
                         HStack {
                             Label("每月", systemImage: "moon")
                             Spacer()
-                            Text(previewIncome.monthly.currencyString())
+                            Text(previewIncome.monthly.moneyString(currency: currency))
                                 .foregroundStyle(.blue)
                         }
                         HStack {
                             Label("每年", systemImage: "calendar")
                             Spacer()
-                            Text(previewIncome.annual.currencyString())
+                            Text(previewIncome.annual.moneyString(currency: currency))
                                 .foregroundStyle(.green)
                                 .bold()
                         }
@@ -421,7 +440,8 @@ struct AddDividendPositionView: View {
             shares: sharesVal,
             annualYield: yieldVal / 100.0,  // 轉換為小數
             dividendFrequency: frequency,
-            purchasePrice: priceVal
+            purchasePrice: priceVal,
+            currency: currency
         )
 
         persistence.addDividendPosition(position)

@@ -1,5 +1,65 @@
 import Foundation
 
+// MARK: - 幣種枚舉
+enum Currency: String, Codable, CaseIterable, Hashable {
+    case hkd = "HKD"
+    case usd = "USD"
+    case cny = "CNY"
+    case twd = "TWD"
+    case eur = "EUR"
+    case gbp = "GBP"
+    case jpy = "JPY"
+    case sgd = "SGD"
+    case aud = "AUD"
+    case cad = "CAD"
+
+    /// 顯示名稱（含符號）
+    var displayName: String {
+        switch self {
+        case .hkd: return "🇭🇰 港元 (HKD)"
+        case .usd: return "🇺🇸 美元 (USD)"
+        case .cny: return "🇨🇳 人民幣 (CNY)"
+        case .twd: return "🇹🇼 新台幣 (TWD)"
+        case .eur: return "🇪🇺 歐元 (EUR)"
+        case .gbp: return "🇬🇧 英鎊 (GBP)"
+        case .jpy: return "🇯🇵 日圓 (JPY)"
+        case .sgd: return "🇸🇬 新加坡元 (SGD)"
+        case .aud: return "🇦🇺 澳元 (AUD)"
+        case .cad: return "🇨🇦 加元 (CAD)"
+        }
+    }
+
+    /// 簡短代號
+    var code: String { rawValue }
+
+    /// 貨幣符號
+    var symbol: String {
+        switch self {
+        case .hkd: return "HK$"
+        case .usd: return "US$"
+        case .cny: return "¥"
+        case .twd: return "NT$"
+        case .eur: return "€"
+        case .gbp: return "£"
+        case .jpy: return "¥"
+        case .sgd: return "S$"
+        case .aud: return "A$"
+        case .cad: return "C$"
+        }
+    }
+
+    /// 根據市場推導預設幣種
+    static func from(market: StockHolding.StockMarket) -> Currency {
+        switch market {
+        case .us: return .usd
+        case .hk: return .hkd
+        }
+    }
+
+    /// 預設幣種
+    static var `default`: Currency { .hkd }
+}
+
 // MARK: - 記帳交易模型
 struct Transaction: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
@@ -9,6 +69,7 @@ struct Transaction: Identifiable, Codable, Hashable {
     var category: String
     var note: String
     var source: TransactionSource
+    var currency: Currency
 
     enum TransactionType: String, Codable, CaseIterable {
         case income = "收入"
@@ -81,6 +142,7 @@ struct Invoice: Identifiable, Codable {
     var date: Date
     var merchant: String
     var amount: Double
+    var currency: Currency
     var items: [String]
     var rawText: String
     var imageData: Data?
@@ -97,6 +159,7 @@ struct DividendPosition: Identifiable, Codable {
     var annualYield: Double      // 年化收益率，例如 0.055 = 5.5%
     var dividendFrequency: Int   // 每年派息次數 (1=年度, 2=半年度, 4=季度, 12=月度)
     var purchasePrice: Double    // 每股買入價
+    var currency: Currency        // 結算幣種
 
     // 計算總投資額
     var totalInvestment: Double {
@@ -132,6 +195,7 @@ struct WealthSnapshot: Identifiable, Codable {
     var stockValue: Double           // 股票市值
     var totalWealth: Double          // 總財富
     var dailyChange: Double          // 較前一日變化
+    var baseCurrency: Currency       // 結算基準幣種
 }
 
 // MARK: - 記帳類別

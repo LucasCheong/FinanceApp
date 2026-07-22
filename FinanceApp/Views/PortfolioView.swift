@@ -9,21 +9,27 @@ struct PortfolioView: View {
     @State private var isRefreshing = false
     @State private var currentQuotes: [String: StockQuote] = [:]
 
-    // 計算總股票市值
+    // 計算總股票市值（轉換為基準幣種）
     var totalStockValue: Double {
         persistence.holdings.reduce(0) { total, holding in
             let quote = currentQuotes[holding.symbol]
             let currentPrice = quote?.currentPrice ?? holding.purchasePrice
-            return total + Double(holding.shares) * currentPrice
+            let value = Double(holding.shares) * currentPrice
+            let currency = Currency.from(market: holding.market)
+            return total + ExchangeRateProvider.convert(value, from: currency, to: persistence.baseCurrency)
         }
     }
 
-    // 總投資成本
+    // 總投資成本（轉換為基準幣種）
     var totalCost: Double {
-        persistence.holdings.reduce(0) { $0 + Double($1.shares) * $1.purchasePrice }
+        persistence.holdings.reduce(0) { total, holding in
+            let cost = Double(holding.shares) * holding.purchasePrice
+            let currency = Currency.from(market: holding.market)
+            return total + ExchangeRateProvider.convert(cost, from: currency, to: persistence.baseCurrency)
+        }
     }
 
-    // 總盈虧
+    // 總盈虧（基準幣種）
     var totalPnL: Double {
         totalStockValue - totalCost
     }
@@ -33,16 +39,18 @@ struct PortfolioView: View {
         totalCost > 0 ? (totalPnL / totalCost) * 100 : 0
     }
 
-    // 總財富
+    // 總財富（基準幣種）
     var totalWealth: Double {
         persistence.cashBalance + totalStockValue
     }
 
-    // 今日變化
+    // 今日變化（轉換為基準幣種）
     var todayChange: Double {
         persistence.holdings.reduce(0) { total, holding in
-            guard let quote = currentQuotes[holding.symbol] else { return 0 }
-            return total + Double(holding.shares) * quote.change
+            guard let quote = currentQuotes[holding.symbol] else { return total }
+            let change = Double(holding.shares) * quote.change
+            let currency = Currency.from(market: holding.market)
+            return total + ExchangeRateProvider.convert(change, from: currency, to: persistence.baseCurrency)
         }
     }
 
@@ -101,16 +109,20 @@ struct PortfolioView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(totalWealth.currencyString())
+            Text(totalWealth.moneyString(currency: persistence.baseCurrency))
                 .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(.financePrimary)
+
+            Text("基準幣種: \(persistence.baseCurrency.displayName)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             HStack(spacing: 24) {
                 VStack {
                     Text("今日變動")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("\(todayChange >= 0 ? "+" : "")\(todayChange.currencyString())")
+                    Text("\(todayChange >= 0 ? "+" : "")\(todayChange.moneyString(currency: persistence.baseCurrency))")
                         .font(.headline)
                         .foregroundStyle(Color.changeColor(todayChange))
                 }
@@ -119,7 +131,7 @@ struct PortfolioView: View {
                     Text("總盈虧")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("\(totalPnL >= 0 ? "+" : "")\(totalPnL.currencyString())")
+                    Text("\(totalPnL >= 0 ? "+" : "")\(totalPnL.moneyString(currency: persistence.baseCurrency))")
                         .font(.headline)
                         .foregroundStyle(Color.changeColor(totalPnL))
                 }
@@ -185,7 +197,7 @@ struct PortfolioView: View {
                 Text("持倉市值")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(totalStockValue.currencyString())
+                Text(totalStockValue.moneyString(currency: persistence.baseCurrency))
                     .font(.title3.bold())
             }
 
@@ -195,7 +207,7 @@ struct PortfolioView: View {
                 Text("投資成本")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(totalCost.currencyString())
+                Text(totalCost.moneyString(currency: persistence.baseCurrency))
                     .font(.title3.bold())
             }
         }
@@ -286,7 +298,8 @@ struct PortfolioView: View {
             cashBalance: persistence.cashBalance,
             stockValue: totalStockValue,
             totalWealth: totalWealth,
-            dailyChange: dailyChange
+            dailyChange: dailyChange,
+            baseCurrency: persistence.baseCurrency
         )
 
         persistence.saveWealthSnapshot(snapshot)
@@ -339,7 +352,7 @@ struct HoldingRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(currentValue.currencyString(currency: holding.market == .us ? "USD" : "HKD"))
+                Text(currentValue.moneyString(currency: Currency.from(market: holding.market)))
                     .font(.subheadline.bold())
                 HStack(spacing: 2) {
                     Image(systemName: pnl >= 0 ? "arrow.up" : "arrow.down")
@@ -348,7 +361,7 @@ struct HoldingRow: View {
                         .font(.caption.bold())
                 }
                 .foregroundStyle(Color.changeColor(pnl))
-                Text("\(pnl >= 0 ? "+" : "")\(pnl.currencyString(currency: holding.market == .us ? "USD" : "HKD"))")
+                Text("\(pnl >= 0 ? "+" : "")\(pnl.moneyString(currency: Currency.from(market: holding.market)))")
                     .font(.caption2)
                     .foregroundStyle(Color.changeColor(pnl))
             }
@@ -453,7 +466,8 @@ struct AddHoldingView: View {
 
                 if let sharesVal = Int(shares), let priceVal = Double(purchasePrice), sharesVal > 0 {
                     Section("投資總額") {
-                        Text((Double(sharesVal) * priceVal).currencyString())
+                        let currency = Currency.from(market: market)
+                        Text((Double(sharesVal) * priceVal).moneyString(currency: currency))
                             .font(.headline)
                             .foregroundStyle(.financePrimary)
                     }

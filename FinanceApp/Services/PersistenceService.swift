@@ -20,6 +20,8 @@ final class PersistenceService: ObservableObject {
     @Published var invoices: [Invoice] = []
     @Published var dividendPositions: [DividendPosition] = []
     @Published var wealthSnapshots: [WealthSnapshot] = []
+    @Published var baseCurrency: Currency = .hkd   // 基準幣種（用於跨幣種結算）
+    @Published var exchangeRates: [Currency: Double] = ExchangeRateProvider.defaultRates
 
     private init() {
         documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -94,21 +96,83 @@ final class PersistenceService: ObservableObject {
         saveWealthSnapshots()
     }
 
-    // MARK: - 計算屬性
+    // MARK: - 計算屬性（以基準幣種結算）
+
+    /// 總收入（轉換為基準幣種）
     var totalIncome: Double {
-        transactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+        transactions.filter { $0.type == .income }.reduce(0) { total, tx in
+            total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+        }
     }
 
+    /// 總支出（轉換為基準幣種）
     var totalExpense: Double {
-        transactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+        transactions.filter { $0.type == .expense }.reduce(0) { total, tx in
+            total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+        }
     }
 
+    /// 現金結餘（基準幣種）
     var cashBalance: Double {
         totalIncome - totalExpense
     }
 
+    /// 本月收入（基準幣種）
+    var monthlyIncome: Double {
+        transactions.filter { $0.type == .income && $0.date.isThisMonth }
+            .reduce(0) { total, tx in
+                total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            }
+    }
+
+    /// 本月支出（基準幣種）
+    var monthlyExpense: Double {
+        transactions.filter { $0.type == .expense && $0.date.isThisMonth }
+            .reduce(0) { total, tx in
+                total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            }
+    }
+
+    /// 本月結餘（基準幣種）
+    var monthlyBalance: Double {
+        monthlyIncome - monthlyExpense
+    }
+
+    /// 年度股息收入（轉換為基準幣種）
     var totalDividendAnnualIncome: Double {
-        dividendPositions.reduce(0) { $0 + $1.annualDividendIncome }
+        dividendPositions.reduce(0) { total, pos in
+            total + ExchangeRateProvider.convert(pos.annualDividendIncome, from: pos.currency, to: baseCurrency)
+        }
+    }
+
+    /// 按幣種分組的股息收入
+    var dividendIncomeByCurrency: [Currency: Double] {
+        var result: [Currency: Double] = [:]
+        for pos in dividendPositions {
+            result[pos.currency, default: 0] += pos.annualDividendIncome
+        }
+        return result
+    }
+
+    /// 按幣種分組的交易結餘
+    var cashBalanceByCurrency: [Currency: Double] {
+        var incomeByCurrency: [Currency: Double] = [:]
+        var expenseByCurrency: [Currency: Double] = [:]
+        for tx in transactions {
+            if tx.type == .income {
+                incomeByCurrency[tx.currency, default: 0] += tx.amount
+            } else {
+                expenseByCurrency[tx.currency, default: 0] += tx.amount
+            }
+        }
+        var result: [Currency: Double] = [:]
+        for currency in incomeByCurrency.keys {
+            result[currency] = (incomeByCurrency[currency] ?? 0) - (expenseByCurrency[currency] ?? 0)
+        }
+        for currency in expenseByCurrency.keys where result[currency] == nil {
+            result[currency] = -(expenseByCurrency[currency] ?? 0)
+        }
+        return result
     }
 
     // MARK: - 存儲方法
