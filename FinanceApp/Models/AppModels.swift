@@ -385,3 +385,186 @@ struct MovingAverageSignal: Identifiable {
         return (currentPrice - ma20) / ma20 * 100
     }
 }
+
+// MARK: - 月度預算模型
+struct Budget: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var category: String
+    var monthlyLimit: Double
+    var currency: Currency
+    var year: Int
+    var month: Int
+
+    var usedAmount: Double = 0  // 運行時計算
+    var remainingAmount: Double {
+        monthlyLimit - usedAmount
+    }
+    var usagePercent: Double {
+        guard monthlyLimit > 0 else { return 0 }
+        return (usedAmount / monthlyLimit) * 100
+    }
+    var isOverBudget: Bool {
+        usedAmount > monthlyLimit
+    }
+    var isNearLimit: Bool {
+        usagePercent >= 80 && !isOverBudget
+    }
+}
+
+// MARK: - 週期性交易模型
+struct RecurringTransaction: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var title: String
+    var amount: Double
+    var type: Transaction.TransactionType
+    var category: String
+    var currency: Currency
+    var frequency: Frequency
+    var dayOfMonth: Int  // 每月第幾天執行 (1-28)
+    var startDate: Date
+    var endDate: Date?     // nil = 永久
+    var lastExecuted: Date?
+    var isEnabled: Bool = true
+
+    enum Frequency: String, Codable, CaseIterable {
+        case weekly = "每週"
+        case monthly = "每月"
+        case quarterly = "每季"
+        case yearly = "每年"
+
+        var icon: String {
+            switch self {
+            case .weekly: return "arrow.clockwise.circle"
+            case .monthly: return "calendar"
+            case .quarterly: return "calendar.badge.clock"
+            case .yearly: return "calendar.badge.plus"
+            }
+        }
+    }
+
+    var nextExecuteDate: Date {
+        let calendar = Calendar.current
+        let now = Date()
+        var components = DateComponents()
+        components.day = min(dayOfMonth, 28)
+
+        switch frequency {
+        case .monthly:
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: now) ?? now
+            components.month = calendar.component(.month, from: nextMonth)
+            components.year = calendar.component(.year, from: nextMonth)
+        case .yearly:
+            let nextYear = calendar.date(byAdding: .year, value: 1, to: now) ?? now
+            components.month = calendar.component(.month, from: startDate)
+            components.year = calendar.component(.year, from: nextYear)
+        case .quarterly:
+            let nextQuarter = calendar.date(byAdding: .month, value: 3, to: now) ?? now
+            components.month = calendar.component(.month, from: nextQuarter)
+            components.year = calendar.component(.year, from: nextQuarter)
+        case .weekly:
+            return calendar.date(byAdding: .day, value: 7, to: now) ?? now
+        }
+        return calendar.date(from: components) ?? now
+    }
+}
+
+// MARK: - 股價警報模型
+struct PriceAlert: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var symbol: String
+    var name: String
+    var market: StockHolding.StockMarket
+    var condition: AlertCondition
+    var targetPrice: Double
+    var isEnabled: Bool = true
+    var createdAt: Date = Date()
+    var triggeredAt: Date?
+
+    enum AlertCondition: String, Codable, CaseIterable {
+        case above = "高於"
+        case below = "低於"
+
+        var icon: String {
+            switch self {
+            case .above: return "arrow.up.circle.fill"
+            case .below: return "arrow.down.circle.fill"
+            }
+        }
+    }
+
+    func shouldTrigger(currentPrice: Double) -> Bool {
+        switch condition {
+        case .above: return currentPrice >= targetPrice
+        case .below: return currentPrice <= targetPrice
+        }
+    }
+}
+
+// MARK: - 定期定額(DCA)追蹤模型
+struct DCAPosition: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var symbol: String
+    var name: String
+    var market: StockHolding.StockMarket
+    var totalInvested: Double      // 總投入金額
+    var totalShares: Double         // 總股數
+    var investmentCount: Int        // 投資次數
+    var currency: Currency
+    var records: [DCARecord]         // 每次投入記錄
+}
+
+struct DCARecord: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var date: Date
+    var amount: Double
+    var shares: Double
+    var pricePerShare: Double
+}
+
+extension DCAPosition {
+    // 平均成本
+    var avgCost: Double {
+        guard totalShares > 0 else { return 0 }
+        return totalInvested / totalShares
+    }
+
+    // 基於當前價格的市值
+    func currentValue(currentPrice: Double) -> Double {
+        totalShares * currentPrice
+    }
+
+    // 基於當前價格的盈虧
+    func pnl(currentPrice: Double) -> Double {
+        currentValue(currentPrice: currentPrice) - totalInvested
+    }
+
+    // 基於當前價格的回報率
+    func pnlPercent(currentPrice: Double) -> Double {
+        guard totalInvested > 0 else { return 0 }
+        return pnl(currentPrice: currentPrice) / totalInvested * 100
+    }
+}
+
+// MARK: - 月度報告模型
+struct MonthlyReport: Identifiable {
+    var id: String { "\(year)-\(month)" }
+    let year: Int
+    let month: Int
+    let totalIncome: Double
+    let totalExpense: Double
+    let balance: Double
+    let topExpenseCategory: String?
+    let topExpenseAmount: Double
+    let transactionCount: Int
+    let budgetStatus: String  // "達標" / "超支" / "無預算"
+    let savingsRate: Double   // 儲蓄率 = balance / income * 100
+
+    var monthName: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant")
+        formatter.dateFormat = "MMMM"
+        let components = DateComponents(year: year, month: month)
+        let date = Calendar.current.date(from: components) ?? Date()
+        return formatter.string(from: date)
+    }
+}
