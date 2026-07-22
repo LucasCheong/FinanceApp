@@ -76,7 +76,7 @@ struct InvoiceImportView: View {
                     .foregroundStyle(.white)
                     .cornerRadius(10)
             }
-            .onChange(of: selectedItems) { _, _ in
+            .onChange(of: selectedItems) { _ in
                 Task { await loadImages() }
             }
         }

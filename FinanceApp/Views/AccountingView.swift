@@ -260,7 +260,7 @@ struct AddTransactionView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: type) { _, _ in
+                    .onChange(of: type) { _ in
                         category = currentCategories.first ?? ""
                     }
                 }

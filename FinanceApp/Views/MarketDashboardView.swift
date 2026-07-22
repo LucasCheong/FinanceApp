@@ -96,7 +96,7 @@ struct MarketDashboardView: View {
         }
         .pickerStyle(.segmented)
         .padding()
-        .onChange(of: marketFilter) { _, _ in
+        .onChange(of: marketFilter) { _ in
             Task { await refreshData() }
         }
     }
