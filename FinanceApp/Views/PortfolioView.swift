@@ -144,33 +144,35 @@ struct PortfolioView: View {
             Text("財富走勢")
                 .font(.headline)
 
-            Chart(persistence.wealthSnapshots.suffix(30)) { snapshot in
-                LineMark(
-                    x: .value("日期", snapshot.date),
-                    y: .value("財富", snapshot.totalWealth)
-                )
-                .foregroundStyle(.financePrimary)
-                .interpolationMethod(.catmullRom)
+            let snapshots = Array(persistence.wealthSnapshots.suffix(30))
 
-                AreaMark(
-                    x: .value("日期", snapshot.date),
-                    y: .value("財富", snapshot.totalWealth)
-                )
-                .foregroundStyle(.linearGradient(
-                    colors: [.financePrimary.opacity(0.3), .clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-                .interpolationMethod(.catmullRom)
-            }
-            .frame(height: 200)
-            .chartYAxis {
-                AxisMarks(position: .leading)
-            }
-            .chartXAxis {
-                AxisMarks { _ in
-                    AxisValueLabel(format: .dateTime.month().day())
+            if snapshots.count > 1 {
+                Chart(snapshots) { snapshot in
+                    LineMark(
+                        x: .value("日期", snapshot.date),
+                        y: .value("財富", snapshot.totalWealth)
+                    )
+                    .foregroundStyle(.financePrimary)
+                    .interpolationMethod(.catmullRom)
+
+                    AreaMark(
+                        x: .value("日期", snapshot.date),
+                        y: .value("財富", snapshot.totalWealth)
+                    )
+                    .foregroundStyle(.linearGradient(
+                        colors: [.financePrimary.opacity(0.3), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .interpolationMethod(.catmullRom)
                 }
+                .frame(height: 200)
+                .chartYScale(domain: .automatic)
+            } else {
+                Text("至少需要 2 筆結算記錄才能顯示走勢圖")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(height: 200)
             }
         }
         .cardStyle()
