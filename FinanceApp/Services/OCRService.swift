@@ -10,21 +10,22 @@ final class OCRService {
 
     // MARK: - 識別單張發票圖片
     func recognizeText(in image: UIImage) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            guard let cgImage = image.cgImage else {
-                continuation.resume(throwing: OCRError.invalidImage)
-                return
-            }
+        guard let cgImage = image.cgImage else {
+            throw OCRError.invalidImage
+        }
+
+        // 在 Task.detached 內部創建所有 Vision 物件，避免跨 actor 捕獲非 Sendable 類型
+        return try await Task.detached(priority: .userInitiated) {
+            var resultText = ""
+            var resultError: Error?
 
             let request = VNRecognizeTextRequest { request, error in
                 if let error = error {
-                    continuation.resume(throwing: error)
+                    resultError = error
                     return
                 }
-
                 let observations = request.results as? [VNRecognizedTextObservation] ?? []
-                let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-                continuation.resume(returning: text)
+                resultText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
             }
 
             request.recognitionLevel = .accurate
@@ -32,14 +33,14 @@ final class OCRService {
             request.usesLanguageCorrection = true
 
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try handler.perform([request])
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+            try handler.perform([request])
+
+            if let resultError = resultError {
+                throw resultError
             }
-        }
+
+            return resultText
+        }.value
     }
 
     // MARK: - 批量識別發票
