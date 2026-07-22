@@ -4,6 +4,7 @@ import SwiftUI
 struct AccountingView: View {
     @StateObject private var persistence = PersistenceService.shared
     @State private var showingAddTransaction = false
+    @State private var showingAnalysis = false
     @State private var selectedFilter: TransactionFilter = .all
 
     enum TransactionFilter: String, CaseIterable {
@@ -36,6 +37,9 @@ struct AccountingView: View {
                     // 本月概覽
                     monthlyOverviewCard
 
+                    // 支出分析入口按鈕
+                    analysisButton
+
                     // 篩選器
                     filterPicker
 
@@ -51,17 +55,29 @@ struct AccountingView: View {
             .navigationTitle("記帳")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingAddTransaction = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.financePrimary)
+                    HStack {
+                        Button {
+                            showingAnalysis = true
+                        } label: {
+                            Image(systemName: "chart.bar.fill")
+                                .font(.title2)
+                                .foregroundStyle(.financePrimary)
+                        }
+                        Button {
+                            showingAddTransaction = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.financePrimary)
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showingAddTransaction) {
                 AddTransactionView()
+            }
+            .sheet(isPresented: $showingAnalysis) {
+                ExpenseAnalysisView()
             }
         }
     }
@@ -142,6 +158,33 @@ struct AccountingView: View {
         .cardStyle()
     }
 
+    // MARK: - 支出分析入口按鈕
+    private var analysisButton: some View {
+        Button {
+            showingAnalysis = true
+        } label: {
+            HStack {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("支出分析")
+                        .font(.subheadline.bold())
+                    Text("年度各類目支出對比")
+                        .font(.caption)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color.cardBackground)
+            .cornerRadius(10)
+        }
+    }
+
     // MARK: - 篩選器
     private var filterPicker: some View {
         Picker("篩選", selection: $selectedFilter) {
@@ -187,11 +230,7 @@ struct TransactionRow: View {
     let transaction: Transaction
 
     private var categoryIcon: String {
-        if transaction.type == .income {
-            return IncomeCategory(rawValue: transaction.category)?.icon ?? "banknote"
-        } else {
-            return ExpenseCategory(rawValue: transaction.category)?.icon ?? "creditcard"
-        }
+        PersistenceService.shared.categoryIcon(for: transaction.category, type: transaction.type)
     }
 
     var body: some View {
@@ -250,9 +289,7 @@ struct AddTransactionView: View {
     @State private var currency: Currency = .hkd
 
     var currentCategories: [String] {
-        type == .income
-            ? IncomeCategory.allCases.map { $0.rawValue }
-            : ExpenseCategory.allCases.map { $0.rawValue }
+        persistence.allCategoryNames(for: type)
     }
 
     var body: some View {

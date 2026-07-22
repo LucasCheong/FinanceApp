@@ -13,6 +13,7 @@ final class PersistenceService: ObservableObject {
     private let invoicesFile = "invoices.json"
     private let dividendsFile = "dividends.json"
     private let wealthSnapshotsFile = "wealth_snapshots.json"
+    private let customCategoriesFile = "custom_categories.json"
 
     // 發布的數據
     @Published var transactions: [Transaction] = []
@@ -22,10 +23,126 @@ final class PersistenceService: ObservableObject {
     @Published var wealthSnapshots: [WealthSnapshot] = []
     @Published var baseCurrency: Currency = .hkd   // 基準幣種（用於跨幣種結算）
     @Published var exchangeRates: [Currency: Double] = ExchangeRateProvider.defaultRates
+    @Published var customCategories: [CustomCategory] = []
 
     private init() {
         documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         loadAll()
+    }
+
+    // MARK: - 自定義類別管理
+    func addCustomCategory(_ category: CustomCategory) {
+        customCategories.append(category)
+        saveCustomCategories()
+    }
+
+    func deleteCustomCategory(at indexSet: IndexSet) {
+        customCategories.remove(atOffsets: indexSet)
+        saveCustomCategories()
+    }
+
+    /// 獲取指定類型的所有類別名稱（預設 + 自定義）
+    func allCategoryNames(for type: Transaction.TransactionType) -> [String] {
+        let defaultCategories: [String]
+        if type == .income {
+            defaultCategories = IncomeCategory.allCases.map { $0.rawValue }
+        } else {
+            defaultCategories = ExpenseCategory.allCases.map { $0.rawValue }
+        }
+        let customNames = customCategories.filter { $0.type == type }.map { $0.name }
+        return defaultCategories + customNames
+    }
+
+    /// 獲取類別圖標（包含自定義類別）
+    func categoryIcon(for name: String, type: Transaction.TransactionType) -> String {
+        if type == .income {
+            if let cat = IncomeCategory(rawValue: name) { return cat.icon }
+        } else {
+            if let cat = ExpenseCategory(rawValue: name) { return cat.icon }
+        }
+        if let custom = customCategories.first(where: { $0.name == name }) {
+            return custom.icon
+        }
+        return "ellipsis.circle.fill"
+    }
+
+    // MARK: - 年度支出統計
+    /// 獲取所有交易年份（降序）
+    var availableYears: [Int] {
+        let calendar = Calendar.current
+        let years = Set(transactions.compactMap { calendar.component(.year, from: $0.date) })
+        return years.sorted(by: >)
+    }
+
+    /// 計算指定年份的各類別支出統計
+    func yearlyCategoryStats(for year: Int) -> [CategoryYearlyStats] {
+        let calendar = Calendar.current
+        let previousYear = year - 1
+
+        // 當年交易
+        let yearTransactions = transactions.filter {
+            calendar.component(.year, from: $0.date) == year && $0.type == .expense
+        }
+
+        // 去年交易
+        let prevYearTransactions = transactions.filter {
+            calendar.component(.year, from: $0.date) == previousYear && $0.type == .expense
+        }
+
+        // 收集所有類別
+        let allCategories = Set(yearTransactions.map { $0.category })
+        let prevCategories = Set(prevYearTransactions.map { $0.category })
+        let combinedCategories = allCategories.union(prevCategories)
+
+        return combinedCategories.compactMap { category in
+            let yearTxs = yearTransactions.filter { $0.category == category }
+            let prevTxs = prevYearTransactions.filter { $0.category == category }
+
+            let yearAmount = yearTxs.reduce(0) { total, tx in
+                total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            }
+            let prevAmount = prevTxs.reduce(0) { total, tx in
+                total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            }
+
+            // 只返回有數據的類別
+            guard yearAmount > 0 || prevAmount > 0 else { return nil }
+
+            return CategoryYearlyStats(
+                category: category,
+                icon: categoryIcon(for: category, type: .expense),
+                year: year,
+                amount: yearAmount,
+                transactionCount: yearTxs.count,
+                previousYearAmount: prevAmount
+            )
+        }
+        .sorted { $0.amount > $1.amount }
+    }
+
+    /// 計算指定年份的支出總覽
+    func yearlyExpenseOverview(for year: Int) -> YearlyExpenseOverview {
+        let calendar = Calendar.current
+        let yearTransactions = transactions.filter {
+            calendar.component(.year, from: $0.date) == year
+        }
+        let totalExpense = yearTransactions
+            .filter { $0.type == .expense }
+            .reduce(0) { total, tx in
+                total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            }
+        let totalIncome = yearTransactions
+            .filter { $0.type == .income }
+            .reduce(0) { total, tx in
+                total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            }
+
+        return YearlyExpenseOverview(
+            year: year,
+            totalExpense: totalExpense,
+            totalIncome: totalIncome,
+            categories: yearlyCategoryStats(for: year)
+        )
     }
 
     // MARK: - 交易記錄
@@ -196,6 +313,10 @@ final class PersistenceService: ObservableObject {
         save(wealthSnapshots, to: wealthSnapshotsFile)
     }
 
+    private func saveCustomCategories() {
+        save(customCategories, to: customCategoriesFile)
+    }
+
     private func save<T: Encodable>(_ data: T, to filename: String) {
         let url = documentsDirectory.appendingPathComponent(filename)
         do {
@@ -214,6 +335,7 @@ final class PersistenceService: ObservableObject {
         invoices = load(invoicesFile) ?? []
         dividendPositions = load(dividendsFile) ?? []
         wealthSnapshots = load(wealthSnapshotsFile) ?? []
+        customCategories = load(customCategoriesFile) ?? []
     }
 
     private func load<T: Decodable>(_ filename: String) -> T? {

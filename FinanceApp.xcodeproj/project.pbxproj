@@ -22,6 +22,7 @@
 		20000000000000000000000D /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000D /* Extensions.swift */; };
 		20000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000F /* Assets.xcassets */; };
 		200000000000000000000011 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000011 /* NotificationManager.swift */; };
+		200000000000000000000012 /* ExpenseAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* ExpenseAnalysisView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 		10000000000000000000000C /* DividendCalculatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividendCalculatorView.swift; sourceTree = "<group>"; };
 		10000000000000000000000D /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		100000000000000000000011 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		100000000000000000000012 /* ExpenseAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseAnalysisView.swift; sourceTree = "<group>"; };
 		10000000000000000000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		10000000000000000000000F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		100000000000000000000010 /* FinanceApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FinanceApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -114,6 +116,7 @@
 				10000000000000000000000A /* MarketDashboardView.swift */,
 				10000000000000000000000B /* PortfolioView.swift */,
 				10000000000000000000000C /* DividendCalculatorView.swift */,
+				100000000000000000000012 /* ExpenseAnalysisView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -209,6 +212,7 @@
 				20000000000000000000000C /* DividendCalculatorView.swift in Sources */,
 				20000000000000000000000D /* Extensions.swift in Sources */,
 				200000000000000000000011 /* NotificationManager.swift in Sources */,
+				200000000000000000000012 /* ExpenseAnalysisView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

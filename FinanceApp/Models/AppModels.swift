@@ -243,6 +243,67 @@ enum IncomeCategory: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - 自定義類別管理
+struct CustomCategory: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var name: String
+    var icon: String
+    var type: Transaction.TransactionType
+    var color: String  // 顏色標識，用於圖表
+}
+
+// MARK: - 年度類別支出統計模型
+struct CategoryYearlyStats: Identifiable {
+    var id: String { "\(category)-\(year)" }
+    let category: String
+    let icon: String
+    let year: Int
+    let amount: Double
+    let transactionCount: Int
+    var previousYearAmount: Double  // 去年同類別金額
+
+    /// 同比增長金額
+    var yoyChange: Double {
+        amount - previousYearAmount
+    }
+
+    /// 同比增長百分比
+    var yoyPercent: Double {
+        guard previousYearAmount > 0 else { return 0 }
+        return (yoyChange / previousYearAmount) * 100
+    }
+
+    /// 是否為新增類別（去年沒有支出）
+    var isNewCategory: Bool {
+        previousYearAmount == 0 && amount > 0
+    }
+}
+
+// MARK: - 年度支出總覽模型
+struct YearlyExpenseOverview: Identifiable {
+    var id: Int { year }
+    let year: Int
+    let totalExpense: Double
+    let totalIncome: Double
+    let categories: [CategoryYearlyStats]
+
+    /// 前一年總支出
+    var previousYearExpense: Double {
+        categories.reduce(0) { $0 + $1.previousYearAmount }
+    }
+
+    /// 同比增長金額
+    var yoyChange: Double {
+        totalExpense - previousYearExpense
+    }
+
+    /// 同比增長百分比
+    var yoyPercent: Double {
+        guard previousYearExpense > 0 else { return 0 }
+        return (yoyChange / previousYearExpense) * 100
+    }
+}
+
 // MARK: - 均線技術信號模型
 struct MovingAverageSignal: Identifiable {
     var id: String { symbol }
