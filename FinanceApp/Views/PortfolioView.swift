@@ -453,7 +453,7 @@ struct AddHoldingView: View {
 
                 if let sharesVal = Int(shares), let priceVal = Double(purchasePrice), sharesVal > 0 {
                     Section("投資總額") {
-                        Text(Double(sharesVal) * priceVal.currencyString())
+                        Text((Double(sharesVal) * priceVal).currencyString())
                             .font(.headline)
                             .foregroundStyle(.financePrimary)
                     }
