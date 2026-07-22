@@ -258,43 +258,7 @@ struct InvoiceReviewView: View {
         NavigationStack {
             List {
                 ForEach(Array(parsedInvoices.enumerated()), id: \.offset) { index, $invoice in
-                    Section("發票 #\(index + 1) - \(invoice.merchant)") {
-                        if let image = invoice.image {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: 200)
-                                .cornerRadius(8)
-                        }
-
-                        TextField("商家名稱", text: $invoice.merchant)
-
-                        HStack {
-                            Text("金額")
-                            Spacer()
-                            TextField("0", value: $invoice.amount, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                        }
-
-                        DatePicker("日期", selection: $invoice.date, displayedComponents: .date)
-
-                        if !invoice.items.isEmpty {
-                            DisclosureGroup("識別到的項目 (\(invoice.items.count))") {
-                                ForEach(invoice.items, id: \.self) { item in
-                                    Text(item)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-
-                        DisclosureGroup("原始文字") {
-                            Text(invoice.rawText)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    InvoiceReviewSection(index: index, invoice: $invoice)
                 }
             }
             .navigationTitle("審核發票")
@@ -343,6 +307,74 @@ struct InvoiceReviewView: View {
         // 清理
         parsedInvoices = []
         dismiss()
+    }
+}
+
+// MARK: - 發票審核區段視圖（拆分出來減輕編譯器負擔）
+struct InvoiceReviewSection: View {
+    let index: Int
+    @Binding var invoice: ParsedInvoiceData
+
+    var body: some View {
+        Section("發票 #\(index + 1) - \(invoice.merchant)") {
+            invoiceImage
+            merchantField
+            amountField
+            dateField
+            itemsSection
+            rawTextSection
+        }
+    }
+
+    private var invoiceImage: some View {
+        Group {
+            if let image = invoice.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 200)
+                    .cornerRadius(8)
+            }
+        }
+    }
+
+    private var merchantField: some View {
+        TextField("商家名稱", text: $invoice.merchant)
+    }
+
+    private var amountField: some View {
+        HStack {
+            Text("金額")
+            Spacer()
+            TextField("0", value: $invoice.amount, format: .number)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var dateField: some View {
+        DatePicker("日期", selection: $invoice.date, displayedComponents: .date)
+    }
+
+    @ViewBuilder
+    private var itemsSection: some View {
+        if !invoice.items.isEmpty {
+            DisclosureGroup("識別到的項目 (\(invoice.items.count))") {
+                ForEach(invoice.items, id: \.self) { item in
+                    Text(item)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var rawTextSection: some View {
+        DisclosureGroup("原始文字") {
+            Text(invoice.rawText)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
