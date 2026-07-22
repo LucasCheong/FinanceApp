@@ -98,6 +98,8 @@ struct MarketDashboardView: View {
                 .sorted { $0.dividendYield > $1.dividendYield }
         case .etfReturns:
             return []  // 已在上面處理
+        case .signals:
+            return []  // 技術信號使用獨立列表，不使用 displayQuotes
         }
     }
 
@@ -462,6 +464,8 @@ struct MarketQuoteRow: View {
                         .foregroundStyle(.secondary)
 
                 case .etfReturns:
+                    EmptyView()
+                case .signals:
                     EmptyView()
                 }
             }
