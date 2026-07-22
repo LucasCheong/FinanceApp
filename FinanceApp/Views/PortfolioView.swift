@@ -416,25 +416,43 @@ struct AddHoldingView: View {
                                 Text(m.rawValue).tag(m)
                             }
                         }
-                    } else {
-                        TextField("搜尋股票...", text: $searchText)
-
-                        if let selected = selectedStock {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                Text(selected.displayName)
-                                    .font(.subheadline)
+                    } else if let selected = selectedStock {
+                        // 已選擇股票 - 顯示選中卡片 + 更改按鈕
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text(selected.symbol)
+                                        .font(.subheadline.bold())
+                                    Text(selected.market.flag)
+                                        .font(.caption)
+                                }
+                                Text(selected.name)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if selected.dividendYield > 0 {
+                                    Text(selected.dividendYield.yieldPercent())
+                                        .font(.caption2)
+                                        .foregroundStyle(.financePrimary)
+                                }
                             }
+                            Spacer()
+                            Button("更改") {
+                                selectedStock = nil
+                                searchText = ""
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.financePrimary)
                         }
+                    } else {
+                        // 搜尋模式
+                        TextField("搜尋股票...", text: $searchText)
 
                         ForEach(searchResults.prefix(10)) { stock in
                             Button {
                                 selectedStock = stock
                                 market = stock.market
-                                if purchasePrice.isEmpty {
-                                    // 預設不填，讓用戶輸入
-                                }
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading) {
@@ -450,10 +468,6 @@ struct AddHoldingView: View {
                                             .font(.caption)
                                             .foregroundStyle(.financePrimary)
                                     }
-                                    if selectedStock?.symbol == stock.symbol {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.financePrimary)
-                                    }
                                 }
                             }
                             .foregroundStyle(.primary)
@@ -461,14 +475,17 @@ struct AddHoldingView: View {
                     }
                 }
 
-                Section("持倉信息") {
-                    TextField("股數", text: $shares)
-                        .keyboardType(.numberPad)
+                // 持倉信息 - 選擇股票或手動輸入後才顯示
+                if isCustom || selectedStock != nil {
+                    Section("持倉信息") {
+                        TextField("股數", text: $shares)
+                            .keyboardType(.numberPad)
 
-                    TextField("買入價格", text: $purchasePrice)
-                        .keyboardType(.decimalPad)
+                        TextField("買入價格", text: $purchasePrice)
+                            .keyboardType(.decimalPad)
 
-                    DatePicker("買入日期", selection: $purchaseDate, displayedComponents: .date)
+                        DatePicker("買入日期", selection: $purchaseDate, displayedComponents: .date)
+                    }
                 }
 
                 if let sharesVal = Int(shares), let priceVal = Double(purchasePrice), sharesVal > 0 {
