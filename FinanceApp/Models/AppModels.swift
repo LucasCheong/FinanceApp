@@ -242,3 +242,85 @@ enum IncomeCategory: String, CaseIterable, Codable {
         }
     }
 }
+
+// MARK: - 均線技術信號模型
+struct MovingAverageSignal: Identifiable {
+    var id: String { symbol }
+    let symbol: String
+    let name: String
+    let market: StockHolding.StockMarket
+    let currentPrice: Double
+    let ma10: Double          // 10日均線
+    let ma20: Double          // 20日均線
+    let previousClose: Double // 前日收盤價
+
+    // 信號類型
+    enum SignalType: String {
+        case buyBreakout    // 突破MA10，買入信號
+        case sellBreakdown  // 跌破MA20，賣出信號
+        case nearBuy        // 接近MA10（差距<2%）
+        case nearSell       // 接近MA20（差距<2%）
+        case hold           // 持有/無信號
+
+        var displayName: String {
+            switch self {
+            case .buyBreakout: return "買入信號"
+            case .sellBreakdown: return "賣出信號"
+            case .nearBuy: return "關注買入"
+            case .nearSell: return "關注賣出"
+            case .hold: return "持有"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .buyBreakout: return "arrow.up.circle.fill"
+            case .sellBreakdown: return "arrow.down.circle.fill"
+            case .nearBuy: return "eye.fill"
+            case .nearSell: return "eye.fill"
+            case .hold: return "minus.circle"
+            }
+        }
+    }
+
+    // 判斷信號
+    var signalType: SignalType {
+        let ma10Diff = (currentPrice - ma10) / ma10 * 100
+        let ma20Diff = (currentPrice - ma20) / ma20 * 100
+
+        // 突破MA10：今日價格 > MA10 且前日收盤 <= MA10（剛突破）
+        if currentPrice > ma10 && previousClose <= ma10 {
+            return .buyBreakout
+        }
+        // 跌破MA20：今日價格 < MA20 且前日收盤 >= MA20（剛跌破）
+        if currentPrice < ma20 && previousClose >= ma20 {
+            return .sellBreakdown
+        }
+        // 接近MA10（差距在2%以內且在上方）
+        if abs(ma10Diff) <= 2 && currentPrice >= ma10 {
+            return .nearBuy
+        }
+        // 接近MA20（差距在2%以內且在下方）
+        if abs(ma20Diff) <= 2 && currentPrice <= ma20 {
+            return .nearSell
+        }
+        return .hold
+    }
+
+    // 是否為行動信號（需要提醒）
+    var isActionable: Bool {
+        signalType == .buyBreakout || signalType == .sellBreakdown
+    }
+
+    // 距離MA10的百分比
+    var distanceToMA10: Double {
+        guard ma10 > 0 else { return 0 }
+        return (currentPrice - ma10) / ma10 * 100
+    }
+
+    // 距離MA20的百分比
+    var distanceToMA20: Double {
+        guard ma20 > 0 else { return 0 }
+        return (currentPrice - ma20) / ma20 * 100
+    }
+}

@@ -182,4 +182,125 @@ final class StockService: ObservableObject {
             $0.name.lowercased().contains(lowercaseQuery)
         }
     }
+
+    // MARK: - 拉取歷史收盤價數據（用於均線計算）
+    /// 返回最近 N 天的收盤價數組（按日期升序）
+    func fetchHistoricalCloses(for symbol: String, days: Int = 30) async -> [Double] {
+        // range=2mo 可獲取約 40 個交易日的數據
+        let urlString = "\(baseURL)/\(symbol)?range=2mo&interval=1d"
+        guard let url = URL(string: urlString) else { return [] }
+
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return []
+            }
+            return parseHistoricalCloses(from: data, maxCount: days)
+        } catch {
+            print("獲取 \(symbol) 歷史數據失敗: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    // MARK: - 解析歷史收盤價
+    private func parseHistoricalCloses(from data: Data, maxCount: Int) -> [Double] {
+        struct ChartResponse: Decodable {
+            struct Chart: Decodable {
+                struct Result: Decodable {
+                    struct Indicators: Decodable {
+                        struct Quote: Decodable {
+                            let close: [Double?]
+                        }
+                        let quote: [Quote]
+                    }
+                    let indicators: Indicators?
+                }
+                let result: [Result]?
+            }
+            let chart: Chart
+        }
+
+        do {
+            let decoded = try JSONDecoder().decode(ChartResponse.self, from: data)
+            guard let result = decoded.chart.result?.first,
+                  let closes = result.indicators?.quote.first?.close else { return [] }
+            // 過濾 nil 值，取最後 maxCount 個
+            let validCloses = closes.compactMap { $0 }
+            let startIndex = max(0, validCloses.count - maxCount)
+            return Array(validCloses[startIndex...])
+        } catch {
+            print("解析歷史數據失敗: \(error)")
+            return []
+        }
+    }
+
+    // MARK: - 計算均線信號（批量）
+    /// 對持倉中的股票批量計算均線信號
+    func fetchMovingAverageSignals(for holdings: [StockHolding]) async -> [MovingAverageSignal] {
+        var signals: [MovingAverageSignal] = []
+
+        // 分批處理，每批 3 個
+        let batches = stride(from: 0, to: holdings.count, by: 3).map {
+            Array(holdings[$0..<min($0 + 3, holdings.count)])
+        }
+
+        for batch in batches {
+            let batchSignals = await withTaskGroup(of: MovingAverageSignal?.self) { group -> [MovingAverageSignal] in
+                for holding in batch {
+                    group.addTask {
+                        await self.calculateSignal(for: holding)
+                    }
+                }
+                var results: [MovingAverageSignal] = []
+                for await signal in group {
+                    if let signal = signal {
+                        results.append(signal)
+                    }
+                }
+                return results
+            }
+            signals.append(contentsOf: batchSignals)
+        }
+
+        return signals
+    }
+
+    // MARK: - 計算單支股票的均線信號
+    private func calculateSignal(for holding: StockHolding) async -> MovingAverageSignal? {
+        let closes = await fetchHistoricalCloses(for: holding.symbol, days: 30)
+
+        guard closes.count >= 20 else {
+            // 數據不足，返回默認信號
+            return MovingAverageSignal(
+                symbol: holding.symbol,
+                name: holding.name,
+                market: holding.market,
+                currentPrice: holding.purchasePrice,
+                ma10: holding.purchasePrice,
+                ma20: holding.purchasePrice,
+                previousClose: holding.purchasePrice
+            )
+        }
+
+        let currentPrice = closes.last ?? holding.purchasePrice
+        let previousClose = closes.count >= 2 ? closes[closes.count - 2] : currentPrice
+
+        // 計算 MA10（最近10天平均）
+        let ma10Start = max(0, closes.count - 10)
+        let ma10 = Array(closes[ma10Start...]).reduce(0, +) / Double(closes.count - ma10Start)
+
+        // 計算 MA20（最近20天平均）
+        let ma20Start = max(0, closes.count - 20)
+        let ma20 = Array(closes[ma20Start...]).reduce(0, +) / Double(closes.count - ma20Start)
+
+        return MovingAverageSignal(
+            symbol: holding.symbol,
+            name: holding.name,
+            market: holding.market,
+            currentPrice: currentPrice,
+            ma10: ma10,
+            ma20: ma20,
+            previousClose: previousClose
+        )
+    }
 }

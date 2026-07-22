@@ -3,10 +3,12 @@ import SwiftUI
 // MARK: - 市場看板視圖 - 顯示最大漲幅、跌幅和高息ETF
 struct MarketDashboardView: View {
     @StateObject private var stockService = StockService.shared
+    @StateObject private var persistence = PersistenceService.shared
     @State private var marketFilter: MarketFilter = .all
     @State private var selectedTab: MarketTab = .gainers
     @State private var etfLiveQuotes: [String: StockQuote] = [:]   // ETF 實時報價快取
     @State private var lastRefreshTime: Date?                      // 最後刷新時間
+    @State private var maSignals: [MovingAverageSignal] = []       // 均線信號
 
     enum MarketFilter: String, CaseIterable {
         case all = "全部"
@@ -19,12 +21,15 @@ struct MarketDashboardView: View {
         case losers = "最大跌幅"
         case highYield = "最高收息"
         case etfReturns = "ETF年化回報"
+        case signals = "技術信號"
     }
 
     var filteredStocks: [StockInfo] {
         switch selectedTab {
         case .etfReturns:
             return StockDatabase.mainstreamUSETFs
+        case .signals:
+            return []  // 技術信號使用持倉數據
         default:
             switch marketFilter {
             case .all: return StockDatabase.allStocks
@@ -99,8 +104,8 @@ struct MarketDashboardView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // 市場篩選（ETF年化回報標籤隱藏市場篩選）
-                if selectedTab != .etfReturns {
+                // 市場篩選（ETF年化回報/技術信號標籤隱藏市場篩選）
+                if selectedTab != .etfReturns && selectedTab != .signals {
                     marketFilterPicker
                 }
 
@@ -115,6 +120,16 @@ struct MarketDashboardView: View {
                 // 內容
                 if stockService.isLoading {
                     loadingView
+                } else if selectedTab == .signals {
+                    if maSignals.isEmpty {
+                        if persistence.holdings.isEmpty {
+                            signalsEmptyView
+                        } else {
+                            signalsEmptyView
+                        }
+                    } else {
+                        signalsList
+                    }
                 } else if displayQuotes.isEmpty {
                     emptyView
                 } else {
@@ -229,6 +244,8 @@ struct MarketDashboardView: View {
     private var quotesList: some View {
         if selectedTab == .etfReturns {
             etfReturnsList
+        } else if selectedTab == .signals {
+            signalsList
         } else {
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -239,6 +256,63 @@ struct MarketDashboardView: View {
                 .padding()
             }
         }
+    }
+
+    // MARK: - 技術信號列表
+    private var signalsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                // 說明卡片
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("自選股均線信號", systemImage: "chart.line.uptrend.xyaxis")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.financePrimary)
+                        Spacer()
+                        // 行動信號數量
+                        let actionCount = maSignals.filter { $0.isActionable }.count
+                        if actionCount > 0 {
+                            Text("\(actionCount) 個提醒")
+                                .font(.caption.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.red.opacity(0.15))
+                                .foregroundStyle(.red)
+                                .cornerRadius(6)
+                        }
+                    }
+                    Text("突破10日均線 → 買入信號 | 跌破20日均線 → 賣出信號")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
+
+                // 行動信號優先顯示
+                let sortedSignals = maSignals.sorted { $0.signalType.rawValue < $1.signalType.rawValue }
+                ForEach(sortedSignals) { signal in
+                    SignalRow(signal: signal)
+                }
+            }
+            .padding()
+        }
+    }
+
+    // MARK: - 技術信號空狀態
+    private var signalsEmptyView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("暫無自選股")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("請先到「投資組合」添加股票持倉\n系統將自動監測均線突破/跌破信號")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 載入中
@@ -305,6 +379,25 @@ struct MarketDashboardView: View {
                 self.etfLiveQuotes = liveQuotes
                 self.stockService.isLoading = false
                 self.lastRefreshTime = Date()
+            }
+        } else if selectedTab == .signals {
+            // 技術信號標籤：拉取持倉的歷史數據計算均線
+            guard !persistence.holdings.isEmpty else {
+                await MainActor.run {
+                    self.lastRefreshTime = Date()
+                }
+                return
+            }
+
+            await MainActor.run { stockService.isLoading = true }
+            let signals = await stockService.fetchMovingAverageSignals(for: persistence.holdings)
+            await MainActor.run {
+                self.maSignals = signals
+                self.stockService.isLoading = false
+                self.lastRefreshTime = Date()
+
+                // 發送本地通知（買入/賣出信號）
+                NotificationManager.shared.checkAndNotifySignals(signals)
             }
         } else {
             // 其他標籤：常規拉取
@@ -509,6 +602,99 @@ struct ETFReturnRow: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(returnColor.opacity(0.2), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - 均線信號行視圖
+struct SignalRow: View {
+    let signal: MovingAverageSignal
+
+    private var signalColor: Color {
+        switch signal.signalType {
+        case .buyBreakout: return .green
+        case .sellBreakdown: return .red
+        case .nearBuy: return .blue
+        case .nearSell: return .orange
+        case .hold: return .gray
+        }
+    }
+
+    private var signalBgColor: Color {
+        switch signal.signalType {
+        case .buyBreakout: return Color.green.opacity(0.12)
+        case .sellBreakdown: return Color.red.opacity(0.12)
+        default: return Color.clear
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // 信號圖標
+            ZStack {
+                Circle()
+                    .fill(signalColor.opacity(0.15))
+                    .frame(width: 44, height: 44)
+                Image(systemName: signal.signalType.icon)
+                    .font(.title3)
+                    .foregroundStyle(signalColor)
+            }
+
+            // 股票信息
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(signal.symbol)
+                        .font(.subheadline.bold())
+                    Text(signal.market.flag)
+                        .font(.caption)
+                    // 信號標籤
+                    Text(signal.signalType.displayName)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(signalColor.opacity(0.15))
+                        .foregroundStyle(signalColor)
+                        .cornerRadius(4)
+                }
+                Text(signal.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                // 均線數據
+                HStack(spacing: 12) {
+                    Label(String(format: "MA10: %@", signal.ma10.compactString()), systemImage: "10.circle")
+                    Label(String(format: "MA20: %@", signal.ma20.compactString()), systemImage: "20.circle")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // 右側價格和距離
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(signal.currentPrice.moneyString(currency: Currency.from(market: signal.market)))
+                    .font(.subheadline.bold())
+
+                // 距離MA10
+                Text(String(format: "%@%.2f%%", signal.distanceToMA10 >= 0 ? "↑" : "↓", abs(signal.distanceToMA10)))
+                    .font(.caption2.bold())
+                    .foregroundStyle(signal.distanceToMA10 >= 0 ? .green : .red)
+
+                // 距離MA20
+                Text(String(format: "%@%.2f%%", signal.distanceToMA20 >= 0 ? "↑" : "↓", abs(signal.distanceToMA20)))
+                    .font(.caption2)
+                    .foregroundStyle(signal.distanceToMA20 >= 0 ? .green : .red)
+            }
+        }
+        .padding()
+        .background(signalBgColor.opacity(0.5))
+        .background(Color.cardBackground)
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(signalColor.opacity(signal.isActionable ? 0.4 : 0.15), lineWidth: signal.isActionable ? 1.5 : 1)
         )
     }
 }
