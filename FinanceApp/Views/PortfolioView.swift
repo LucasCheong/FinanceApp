@@ -86,10 +86,17 @@ struct PortfolioView: View {
             .navigationTitle("投資組合")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await refreshPrices() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack {
+                        Button {
+                            showingAddHolding = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
+                        Button {
+                            Task { await refreshPrices() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                 }
             }
