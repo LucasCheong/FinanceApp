@@ -312,7 +312,7 @@ struct AddDividendPositionView: View {
 
                     if isCustom {
                         TextField("股票代碼", text: $customSymbol)
-                            .autocapitalization(.uppercase)
+                            .textInputAutocapitalization(.characters)
                         TextField("股票名稱", text: $customName)
                     } else {
                         TextField("搜尋高息股...", text: $searchText)

@@ -387,7 +387,7 @@ struct AddHoldingView: View {
 
                     if isCustom {
                         TextField("股票代碼 (如 AAPL 或 0700.HK)", text: $customSymbol)
-                            .autocapitalization(.uppercase)
+                            .textInputAutocapitalization(.characters)
                         TextField("股票名稱", text: $customName)
                         Picker("市場", selection: $market) {
                             ForEach(StockHolding.StockMarket.allCases, id: \.self) { m in
