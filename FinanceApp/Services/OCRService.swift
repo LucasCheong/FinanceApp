@@ -13,34 +13,35 @@ final class OCRService {
         guard let cgImage = image.cgImage else {
             throw OCRError.invalidImage
         }
+        return try await Self.performOCR(cgImage: cgImage)
+    }
 
-        // 在 Task.detached 內部創建所有 Vision 物件，避免跨 actor 捕獲非 Sendable 類型
-        return try await Task.detached(priority: .userInitiated) {
-            var resultText = ""
-            var resultError: Error?
+    // MARK: - 執行 OCR（nonisolated 避免 Sendable 警告）
+    private nonisolated static func performOCR(cgImage: CGImage) async throws -> String {
+        var resultText = ""
+        var resultError: Error?
 
-            let request = VNRecognizeTextRequest { request, error in
-                if let error = error {
-                    resultError = error
-                    return
-                }
-                let observations = request.results as? [VNRecognizedTextObservation] ?? []
-                resultText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        let request = VNRecognizeTextRequest { request, error in
+            if let error = error {
+                resultError = error
+                return
             }
+            let observations = request.results as? [VNRecognizedTextObservation] ?? []
+            resultText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        }
 
-            request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
-            request.usesLanguageCorrection = true
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
+        request.usesLanguageCorrection = true
 
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            try handler.perform([request])
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try handler.perform([request])
 
-            if let resultError = resultError {
-                throw resultError
-            }
+        if let resultError = resultError {
+            throw resultError
+        }
 
-            return resultText
-        }.value
+        return resultText
     }
 
     // MARK: - 批量識別發票
