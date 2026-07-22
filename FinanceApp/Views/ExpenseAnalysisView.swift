@@ -359,16 +359,15 @@ struct AddCustomCategoryView: View {
                 Section("圖標") {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 16) {
                         ForEach(availableIcons, id: \.self) { iconName in
-                            Button {
-                                icon = iconName
-                            } label: {
-                                Image(systemName: iconName)
-                                    .font(.title2)
-                                    .foregroundStyle(icon == iconName ? .white : .primary)
-                                    .frame(width: 44, height: 44)
-                                    .background(icon == iconName ? Color.financePrimary : Color.gray.opacity(0.1))
-                                    .cornerRadius(10)
-                            }
+                            Image(systemName: iconName)
+                                .font(.title2)
+                                .foregroundStyle(icon == iconName ? .white : .primary)
+                                .frame(width: 44, height: 44)
+                                .background(icon == iconName ? Color.financePrimary : Color.gray.opacity(0.1))
+                                .cornerRadius(10)
+                                .onTapGesture {
+                                    icon = iconName
+                                }
                         }
                     }
                     .padding(.vertical, 8)
