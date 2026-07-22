@@ -257,8 +257,14 @@ struct InvoiceReviewView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(Array(parsedInvoices.enumerated()), id: \.offset) { index, $invoice in
-                    InvoiceReviewSection(index: index, invoice: $invoice)
+                ForEach(Array(parsedInvoices.enumerated()), id: \.offset) { index, _ in
+                    InvoiceReviewSection(
+                        index: index,
+                        invoice: Binding(
+                            get: { parsedInvoices[index] },
+                            set: { parsedInvoices[index] = $0 }
+                        )
+                    )
                 }
             }
             .navigationTitle("審核發票")
