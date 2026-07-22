@@ -146,14 +146,14 @@ struct PortfolioView: View {
 
             Chart(persistence.wealthSnapshots.suffix(30)) { snapshot in
                 LineMark(
-                    x: .value("日期", snapshot.date, unit: Calendar.Component.day),
+                    x: .value("日期", snapshot.date),
                     y: .value("財富", snapshot.totalWealth)
                 )
                 .foregroundStyle(.financePrimary)
                 .interpolationMethod(.catmullRom)
 
                 AreaMark(
-                    x: .value("日期", snapshot.date, unit: Calendar.Component.day),
+                    x: .value("日期", snapshot.date),
                     y: .value("財富", snapshot.totalWealth)
                 )
                 .foregroundStyle(.linearGradient(
@@ -168,8 +168,8 @@ struct PortfolioView: View {
                 AxisMarks(position: .leading)
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: Calendar.Component.day)) { value in
-                    AxisValueLabel(format: .dateTime.day())
+                AxisMarks { _ in
+                    AxisValueLabel(format: .dateTime.month().day())
                 }
             }
         }
