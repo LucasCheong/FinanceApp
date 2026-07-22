@@ -115,7 +115,7 @@ struct MarketDashboardView: View {
                 tabPicker
 
                 // 最後更新時間
-                if let lastRefreshTime {
+                if lastRefreshTime != nil {
                     lastRefreshBar
                 }
 
@@ -243,6 +243,7 @@ struct MarketDashboardView: View {
     }
 
     // MARK: - 股票列表
+    @ViewBuilder
     private var quotesList: some View {
         if selectedTab == .etfReturns {
             etfReturnsList
