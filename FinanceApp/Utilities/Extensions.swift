@@ -108,6 +108,10 @@ extension Date {
         formatted(as: "yyyy-MM-dd HH:mm")
     }
 
+    var timeString: String {
+        formatted(as: "HH:mm:ss")
+    }
+
     var monthString: String {
         formatted(as: "yyyy年MM月")
     }

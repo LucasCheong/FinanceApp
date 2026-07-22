@@ -5,6 +5,8 @@ struct MarketDashboardView: View {
     @StateObject private var stockService = StockService.shared
     @State private var marketFilter: MarketFilter = .all
     @State private var selectedTab: MarketTab = .gainers
+    @State private var etfLiveQuotes: [String: StockQuote] = [:]   // ETF 實時報價快取
+    @State private var lastRefreshTime: Date?                      // 最後刷新時間
 
     enum MarketFilter: String, CaseIterable {
         case all = "全部"
@@ -33,12 +35,27 @@ struct MarketDashboardView: View {
     }
 
     var displayQuotes: [StockQuote] {
-        // ETF 年化回報標籤使用本地數據，不走網絡拉取
+        // ETF 年化回報標籤：合併本地年化數據 + 實時價格
         if selectedTab == .etfReturns {
             return StockDatabase.mainstreamUSETFs
                 .sorted { $0.annualizedReturn > $1.annualizedReturn }
                 .map { stock in
-                    StockQuote(
+                    // 如果有實時報價就用，否則用本地數據
+                    if let live = etfLiveQuotes[stock.symbol] {
+                        return StockQuote(
+                            symbol: live.symbol,
+                            name: live.name,
+                            market: stock.market.rawValue,
+                            currentPrice: live.currentPrice,
+                            previousClose: live.previousClose,
+                            change: live.change,
+                            changePercent: live.changePercent,
+                            dividendYield: stock.dividendYield,
+                            currency: live.currency,
+                            exchange: live.exchange
+                        )
+                    }
+                    return StockQuote(
                         symbol: stock.symbol,
                         name: stock.name,
                         market: stock.market.rawValue,
@@ -90,8 +107,13 @@ struct MarketDashboardView: View {
                 // 標籤切換
                 tabPicker
 
+                // 最後更新時間
+                if let lastRefreshTime {
+                    lastRefreshBar
+                }
+
                 // 內容
-                if selectedTab != .etfReturns && stockService.isLoading {
+                if stockService.isLoading {
                     loadingView
                 } else if displayQuotes.isEmpty {
                     emptyView
@@ -102,26 +124,42 @@ struct MarketDashboardView: View {
             .navigationTitle("市場看板")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if selectedTab != .etfReturns {
-                        Button {
-                            Task { await refreshData() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
+                    Button {
+                        Task { await refreshData() }
+                    } label: {
+                        Image(systemName: stockService.isLoading ? "arrow.clockwise.circle" : "arrow.clockwise")
+                            .rotationEffect(.degrees(stockService.isLoading ? 360 : 0))
+                            .animation(stockService.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: stockService.isLoading)
                     }
+                    .disabled(stockService.isLoading)
                 }
             }
             .task {
-                if selectedTab != .etfReturns && stockService.quotes.isEmpty {
-                    await refreshData()
-                }
+                await refreshData()
             }
-            .onChange(of: selectedTab) { newTab in
-                if newTab != .etfReturns && stockService.quotes.isEmpty {
-                    Task { await refreshData() }
-                }
+            .onChange(of: selectedTab) { _ in
+                Task { await refreshData() }
             }
         }
+    }
+
+    // MARK: - 最後更新時間條
+    private var lastRefreshBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.caption2)
+            Text("最後更新：\(lastRefreshTime!.timeString)")
+                .font(.caption2)
+            Spacer()
+            if stockService.isLoading {
+                Text("更新中...")
+                    .font(.caption2)
+                    .foregroundStyle(.financePrimary)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal)
+        .padding(.vertical, 4)
     }
 
     // MARK: - 市場篩選器
@@ -156,10 +194,23 @@ struct MarketDashboardView: View {
             LazyVStack(spacing: 8) {
                 // 說明卡片
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("美股主流 ETF 年化回報率排列", systemImage: "chart.bar.fill")
-                        .font(.subheadline.bold())
-                        .foregroundStyle(.financePrimary)
-                    Text("基於5年年化回報率，包含大盤、行業板塊、成長/價值、債券、商品等主流 ETF")
+                    HStack {
+                        Label("美股主流 ETF 年化回報率排列", systemImage: "chart.bar.fill")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.financePrimary)
+                        Spacer()
+                        // 實時數據指示器
+                        if !etfLiveQuotes.isEmpty {
+                            Label("含實時報價", systemImage: "antenna.radiowaves.left.and.right")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("離線數據", systemImage: "wifi.slash")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Text("基於5年年化回報率排列，點擊右上角刷新可獲取實時價格")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -167,7 +218,7 @@ struct MarketDashboardView: View {
                 .cardStyle()
 
                 ForEach(Array(displayQuotes.enumerated()), id: \.element.id) { index, quote in
-                    ETFReturnRow(quote: quote, rank: index + 1)
+                    ETFReturnRow(quote: quote, rank: index + 1, hasLivePrice: etfLiveQuotes[quote.symbol] != nil)
                 }
             }
             .padding()
@@ -219,8 +270,49 @@ struct MarketDashboardView: View {
 
     // MARK: - 刷新數據
     private func refreshData() async {
-        guard selectedTab != .etfReturns else { return }
-        await stockService.fetchQuotes(for: filteredStocks)
+        if selectedTab == .etfReturns {
+            // ETF 標籤：拉取實時報價
+            await MainActor.run { stockService.isLoading = true }
+            let etfStocks = StockDatabase.mainstreamUSETFs
+            var liveQuotes: [String: StockQuote] = [:]
+
+            // 分批拉取，每批 5 個
+            let batches = stride(from: 0, to: etfStocks.count, by: 5).map {
+                Array(etfStocks[$0..<min($0 + 5, etfStocks.count)])
+            }
+
+            for batch in batches {
+                let batchResults = await withTaskGroup(of: StockQuote?.self) { group -> [StockQuote] in
+                    for stock in batch {
+                        group.addTask {
+                            await stockService.fetchSingleQuote(for: stock)
+                        }
+                    }
+                    var results: [StockQuote] = []
+                    for await quote in group {
+                        if let quote = quote, quote.currentPrice > 0 {
+                            results.append(quote)
+                        }
+                    }
+                    return results
+                }
+                for quote in batchResults {
+                    liveQuotes[quote.symbol] = quote
+                }
+            }
+
+            await MainActor.run {
+                self.etfLiveQuotes = liveQuotes
+                self.stockService.isLoading = false
+                self.lastRefreshTime = Date()
+            }
+        } else {
+            // 其他標籤：常規拉取
+            await stockService.fetchQuotes(for: filteredStocks)
+            await MainActor.run {
+                self.lastRefreshTime = Date()
+            }
+        }
     }
 }
 
@@ -299,6 +391,7 @@ struct MarketQuoteRow: View {
 struct ETFReturnRow: View {
     let quote: StockQuote
     let rank: Int
+    let hasLivePrice: Bool   // 是否有實時價格
 
     // 從 StockDatabase 查找對應的 annualizedReturn
     private var annualizedReturn: Double {
@@ -360,11 +453,33 @@ struct ETFReturnRow: View {
                         .background(returnColor.opacity(0.15))
                         .foregroundStyle(returnColor)
                         .cornerRadius(4)
+                    // 實時價格指示燈
+                    if hasLivePrice {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
                 }
                 Text(quote.name)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                // 實時價格行
+                if hasLivePrice {
+                    HStack(spacing: 6) {
+                        Text(quote.currentPrice.moneyString(currency: .usd))
+                            .font(.caption.bold())
+                            .foregroundStyle(.primary)
+                        HStack(spacing: 2) {
+                            Image(systemName: quote.isPositive ? "arrow.up" : "arrow.down")
+                                .font(.caption2)
+                            Text(String(format: "%.2f%%", abs(quote.changePercent)))
+                                .font(.caption2.bold())
+                        }
+                        .foregroundStyle(Color.changeColor(quote.changePercent))
+                    }
+                }
             }
 
             Spacer()
