@@ -267,7 +267,8 @@ struct RecurringRow: View {
                 Text(rt.type == .income ? "+" : "-")
                     + Text(rt.amount.moneyString(currency: rt.currency))
                 .font(.subheadline.bold())
-                .foregroundStyle(rt.type == .income ? .incomeColor : .expenseColor)
+                // Text 拼接的 foregroundStyle 需 iOS 17+，改用 foregroundColor
+                .foregroundColor(rt.type == .income ? .incomeColor : .expenseColor)
 
                 if rt.isEnabled {
                     Text("下次: \(rt.nextExecuteDate.shortDateString)")

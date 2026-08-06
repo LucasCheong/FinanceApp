@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 // MARK: - 資產配置餅圖 + DCA 定期定額追蹤
 struct AssetAllocationView: View {
@@ -121,15 +120,9 @@ struct AssetAllocationView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 40)
             } else {
-                Chart(stockByMarket) { item in
-                    SectorMark(
-                        angle: .value("金額", item.value),
-                        innerRadius: .ratio(0.5),
-                        angularInset: 2
-                    )
-                    .foregroundStyle(by: .value("市場", item.label))
-                }
-                .frame(height: 250)
+                // 自繪甜甜圈圖（相容 iOS 16；SectorMark 需 iOS 17+）
+                DonutChartView(slices: donutSlices(from: stockByMarket))
+                    .frame(height: 250)
 
                 // 圖例
                 ForEach(stockByMarket) { item in
@@ -229,6 +222,26 @@ struct AssetAllocationView: View {
         let value: Double
         let percent: Double
         let color: Color
+    }
+
+    /// 將市場分佈數據轉換為甜甜圈圖切片
+    private func donutSlices(from items: [MarketBreakdownItem]) -> [DonutSlice] {
+        let total = items.reduce(0.0) { $0 + $1.value }
+        guard total > 0 else { return [] }
+
+        var slices: [DonutSlice] = []
+        var currentAngle = -90.0   // 從 12 點鐘方向開始
+        for (index, item) in items.enumerated() {
+            let sweep = item.value / total * 360
+            slices.append(DonutSlice(
+                id: index,
+                startAngle: .degrees(currentAngle),
+                endAngle: .degrees(currentAngle + sweep),
+                color: item.color
+            ))
+            currentAngle += sweep
+        }
+        return slices
     }
 
     private var stockByMarketBreakdown: [MarketBreakdownItem] {
@@ -460,5 +473,57 @@ struct AddDCAPositionView: View {
 
         persistence.addDCAPosition(position)
         dismiss()
+    }
+}
+
+// MARK: - 自繪甜甜圈圖（iOS 16 相容，替代 SectorMark）
+struct DonutSlice: Identifiable {
+    let id: Int
+    let startAngle: Angle
+    let endAngle: Angle
+    let color: Color
+}
+
+struct DonutChartView: View {
+    let slices: [DonutSlice]
+    var innerRatio: CGFloat = 0.55
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            ZStack {
+                ForEach(slices) { slice in
+                    DonutSegmentShape(
+                        startAngle: slice.startAngle,
+                        endAngle: slice.endAngle,
+                        innerRatio: innerRatio
+                    )
+                    .fill(slice.color)
+                    .padding(2)   // 模擬切片間隙
+                }
+            }
+            .frame(width: side, height: side)
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+}
+
+struct DonutSegmentShape: Shape {
+    let startAngle: Angle
+    let endAngle: Angle
+    let innerRatio: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let outerRadius = min(rect.width, rect.height) / 2
+        let innerRadius = outerRadius * innerRatio
+
+        path.addArc(center: center, radius: outerRadius,
+                    startAngle: startAngle, endAngle: endAngle, clockwise: false)
+        path.addArc(center: center, radius: innerRadius,
+                    startAngle: endAngle, endAngle: startAngle, clockwise: true)
+        path.closeSubpath()
+        return path
     }
 }
