@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 // MARK: - 設定視圖 - 全方位設定中心
 struct SettingsView: View {
     @StateObject private var persistence = PersistenceService.shared
-    @Environment(\.dismiss) private var dismiss
 
     @AppStorage("appLockEnabled") private var appLockEnabled = false
     @AppStorage("colorScheme") private var colorScheme = "system"
@@ -48,9 +47,10 @@ struct SettingsView: View {
 
                     Picker(selection: $defaultTab) {
                         Text("記帳").tag(0)
-                        Text("市場").tag(1)
-                        Text("組合").tag(2)
-                        Text("收息").tag(3)
+                        Text("發票").tag(1)
+                        Text("市場").tag(2)
+                        Text("組合").tag(3)
+                        Text("收息").tag(4)
                     } label: {
                         Label("啟動分頁", systemImage: "house")
                     }
@@ -220,11 +220,6 @@ struct SettingsView: View {
             }
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
-            }
             .alert("匯出成功", isPresented: $showingExportSuccess) {
                 Button("確定") { }
             } message: {

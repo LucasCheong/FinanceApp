@@ -12,7 +12,6 @@ struct ContentView: View {
     @State private var showingBudget = false
     @State private var showingAlertCenter = false
     @State private var showingAssetAllocation = false
-    @State private var showingSettings = false
     @State private var showingExchangeRate = false
 
     @AppStorage("colorScheme") private var colorScheme = "system"
@@ -109,20 +108,19 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showingAssetAllocation) { AssetAllocationView() }
 
-        // 收息 + 設定
+        // 收息
         DividendCalculatorView()
             .tabItem {
                 Label("收息", systemImage: "percent")
             }
             .tag(4)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingSettings = true } label: {
-                        Image(systemName: "gearshape.fill")
-                    }
-                }
+
+        // 設定（獨立分頁，SettingsView 內含導航容器）
+        SettingsView()
+            .tabItem {
+                Label("設定", systemImage: "gearshape.fill")
             }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .tag(5)
     }
 }
 
