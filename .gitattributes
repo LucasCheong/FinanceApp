@@ -1,0 +1,2 @@
+# 確保 shell 腳本在 Mac 上使用 LF 換行符（CRLF 會導致 bash 報錯）
+*.sh text eol=lf
