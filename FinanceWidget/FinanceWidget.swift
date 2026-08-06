@@ -4,6 +4,9 @@ import SwiftUI
 // MARK: - 財務管家桌面小組件
 /// 顯示今日支出、本月支出與持倉概覽，數據來自 App Group UserDefaults
 
+/// App Group 標識（與主 App 的 PersistenceService 保持一致）
+private let kAppGroupId = "group.com.financeapp.FinanceApp"
+
 struct FinanceWidgetEntry: TimelineEntry {
     let date: Date
     let todayExpense: Double
@@ -14,10 +17,8 @@ struct FinanceWidgetEntry: TimelineEntry {
 }
 
 struct FinanceWidgetProvider: TimelineProvider {
-    static let appGroupId = "group.com.financeapp.FinanceApp"
-
     private func makeEntry() -> FinanceWidgetEntry {
-        let defaults = UserDefaults(suiteName: appGroupId)
+        let defaults = UserDefaults(suiteName: kAppGroupId)
         return FinanceWidgetEntry(
             date: Date(),
             todayExpense: defaults?.double(forKey: "widgetTodayExpense") ?? 0,
