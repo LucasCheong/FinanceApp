@@ -34,6 +34,8 @@ struct ContentView: View {
         }
         .onAppear {
             PersistenceService.shared.processDueRecurringTransactions()
+            // 啟動時拉取即時匯率（24 小時快取，失敗時自動使用備用匯率）
+            Task { await ExchangeRateProvider.fetchLiveRates() }
         }
     }
 

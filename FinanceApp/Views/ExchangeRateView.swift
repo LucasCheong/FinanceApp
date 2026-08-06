@@ -8,6 +8,8 @@ struct ExchangeRateView: View {
 
     @State private var selectedCurrency: Currency = .usd
     @State private var rateHistory: [RatePoint] = []
+    @State private var isRefreshing = false
+    @State private var ratesVersion = 0   // 匯率更新後觸發畫面刷新
 
     var body: some View {
         NavigationStack {
@@ -38,15 +40,35 @@ struct ExchangeRateView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        generateRateHistory()
+                        refreshRates()
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        if isRefreshing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
+                    .disabled(isRefreshing)
                 }
             }
             .onAppear {
                 generateRateHistory()
+                // 進入頁面時確保有即時匯率
+                Task { await ExchangeRateProvider.fetchLiveRates() }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .exchangeRatesUpdated)) { _ in
+                ratesVersion += 1
+                generateRateHistory()
+            }
+        }
+    }
+
+    /// 強制重新拉取即時匯率
+    private func refreshRates() {
+        isRefreshing = true
+        Task {
+            await ExchangeRateProvider.fetchLiveRates(force: true)
+            isRefreshing = false
         }
     }
 
@@ -97,6 +119,30 @@ struct ExchangeRateView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            // 匯率來源狀態
+            HStack(spacing: 6) {
+                Image(systemName: ExchangeRateProvider.hasLiveRates ? "dot.radiowaves.left.and.right" : "wifi.slash")
+                    .font(.caption2)
+                if ExchangeRateProvider.hasLiveRates {
+                    Text("即時匯率")
+                        .font(.caption2.bold())
+                    if let updateTime = ExchangeRateProvider.lastUpdateTime {
+                        Text("更新於 \(updateTime.formatted(as: "MM-dd HH:mm"))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("備用匯率（待更新）")
+                        .font(.caption2.bold())
+                }
+            }
+            .foregroundStyle(ExchangeRateProvider.hasLiveRates ? Color.gain : Color.neutral)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background((ExchangeRateProvider.hasLiveRates ? Color.gain : Color.neutral).opacity(0.12))
+            .cornerRadius(10)
+            .id(ratesVersion)
         }
         .frame(maxWidth: .infinity)
         .cardStyle()

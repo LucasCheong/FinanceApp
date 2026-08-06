@@ -55,9 +55,8 @@ extension Double {
 }
 
 // MARK: - 匯率轉換工具
-enum ExchangeRateProvider {
-    /// 預設匯率表（以 HKD 為基準，1 HKD = X 外幣）
-    /// 實際使用時應從 API 獲取實時匯率
+enum ExchangeRateProvider: @unchecked Sendable {
+    /// 預設匯率表（以 HKD 為基準，1 HKD = X 外幣）- 作為離線/失敗時的備用值
     static let defaultRates: [Currency: Double] = [
         .hkd: 1.0,
         .usd: 0.128,    // 1 HKD ≈ 0.128 USD
@@ -71,15 +70,110 @@ enum ExchangeRateProvider {
         .cad: 0.175     // 1 HKD ≈ 0.175 CAD
     ]
 
+    /// 即時匯率（啟動時從 open.er-api.com 免費 API 拉取）
+    private static var liveRates: [Currency: Double]? = loadCachedRates()
+    private static var isFetching = false
+
+    /// 匯率快取有效期（24 小時）
+    private static let cacheMaxAge: TimeInterval = 86400
+
+    /// 目前生效的匯率表（即時 > 快取 > 預設）
+    static var currentRates: [Currency: Double] {
+        liveRates ?? defaultRates
+    }
+
+    /// 是否已載入即時匯率
+    static var hasLiveRates: Bool { liveRates != nil }
+
+    /// 即時匯率更新時間
+    static var lastUpdateTime: Date? {
+        let ts = UserDefaults.standard.double(forKey: "exchangeRatesTimestamp")
+        return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
+    }
+
     /// 將金額從 from 幣種轉換為 to 幣種
     static func convert(_ amount: Double, from: Currency, to: Currency) -> Double {
         guard from != to else { return amount }
-        let fromRate = defaultRates[from] ?? 1.0
-        let toRate = defaultRates[to] ?? 1.0
+        let rates = currentRates
+        let fromRate = rates[from] ?? 1.0
+        let toRate = rates[to] ?? 1.0
         // 先轉為 HKD 再轉為目標幣種
         let inHKD = amount / fromRate
         return inHKD * toRate
     }
+
+    /// 拉取即時匯率（免費 API：open.er-api.com，無需 API Key）
+    /// 快取 24 小時，force=true 可強制重新拉取
+    @MainActor
+    static func fetchLiveRates(force: Bool = false) async {
+        guard !isFetching else { return }
+
+        // 快取檢查：24 小時內不重複拉取
+        if !force, let ts = lastUpdateTime, Date().timeIntervalSince(ts) < cacheMaxAge, hasLiveRates {
+            return
+        }
+
+        isFetching = true
+        defer { isFetching = false }
+
+        guard let url = URL(string: "https://open.er-api.com/v6/latest/HKD") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let result = json["result"] as? String, result == "success",
+                  let ratesJson = json["rates"] as? [String: Double] else {
+                print("匯率 API 返回格式異常")
+                return
+            }
+
+            var newRates: [Currency: Double] = [:]
+            for currency in Currency.allCases {
+                if let rate = ratesJson[currency.code] {
+                    newRates[currency] = rate
+                }
+            }
+
+            if newRates[.hkd] != nil {
+                liveRates = newRates
+                cacheRates(newRates)
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "exchangeRatesTimestamp")
+                NotificationCenter.default.post(name: .exchangeRatesUpdated, object: nil)
+                print("即時匯率已更新（\(newRates.count) 個幣種）")
+            }
+        } catch {
+            print("匯率拉取失敗，使用備用匯率: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - 快取存取
+    private static func cacheRates(_ rates: [Currency: Double]) {
+        let dict = rates.mapValues { String($0) }
+        UserDefaults.standard.set(dict, forKey: "exchangeRatesCache")
+    }
+
+    private static func loadCachedRates() -> [Currency: Double]? {
+        // 快取過期則不使用
+        if let ts = UserDefaults.standard.object(forKey: "exchangeRatesTimestamp") as? Double,
+           Date().timeIntervalSince1970 - ts > cacheMaxAge {
+            return nil
+        }
+        guard let dict = UserDefaults.standard.dictionary(forKey: "exchangeRatesCache") as? [String: String] else {
+            return nil
+        }
+        var rates: [Currency: Double] = [:]
+        for (code, value) in dict {
+            if let currency = Currency(rawValue: code), let rate = Double(value) {
+                rates[currency] = rate
+            }
+        }
+        return rates.isEmpty ? nil : rates
+    }
+}
+
+// MARK: - 匯率更新通知
+extension Notification.Name {
+    static let exchangeRatesUpdated = Notification.Name("exchangeRatesUpdated")
 }
 
 // MARK: - Double 跨幣種轉換擴展
