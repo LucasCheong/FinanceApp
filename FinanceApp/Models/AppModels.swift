@@ -12,6 +12,7 @@ enum Currency: String, Codable, CaseIterable, Hashable {
     case sgd = "SGD"
     case aud = "AUD"
     case cad = "CAD"
+    case mop = "MOP"
 
     /// 顯示名稱（含符號）
     var displayName: String {
@@ -26,6 +27,7 @@ enum Currency: String, Codable, CaseIterable, Hashable {
         case .sgd: return "🇸🇬 新加坡元 (SGD)"
         case .aud: return "🇦🇺 澳元 (AUD)"
         case .cad: return "🇨🇦 加元 (CAD)"
+        case .mop: return "🇲🇴 澳門幣 (MOP)"
         }
     }
 
@@ -45,6 +47,7 @@ enum Currency: String, Codable, CaseIterable, Hashable {
         case .sgd: return "S$"
         case .aud: return "A$"
         case .cad: return "C$"
+        case .mop: return "MOP$"
         }
     }
 

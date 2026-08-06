@@ -2,27 +2,68 @@ import SwiftUI
 import LocalAuthentication
 import UniformTypeIdentifiers
 
-// MARK: - 設定視圖 - App鎖 + 深色模式 + 數據匯出
+// MARK: - 設定視圖 - 基準幣種 + 更新頻率 + 主題 + App鎖 + 數據匯出
 struct SettingsView: View {
     @StateObject private var persistence = PersistenceService.shared
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage("appLockEnabled") private var appLockEnabled = false
     @AppStorage("colorScheme") private var colorScheme = "system"
+    @AppStorage("priceAlertNotifications") private var priceAlertNotifications = true
+    @AppStorage("rateUpdateIntervalHours") private var updateIntervalHours = 24.0
 
     @State private var showingExportSuccess = false
     @State private var exportedURL: URL?
+    @State private var showingChangeBaseAlert = false
+    @State private var pendingBaseCurrency: Currency = .hkd
 
     var body: some View {
         NavigationStack {
             Form {
+                // MARK: - 一般設定
+                Section("一般") {
+                    // 介面幣種（基準幣種）
+                    Picker(selection: pickerBinding) {
+                        ForEach(Currency.allCases, id: \.self) { cur in
+                            Text(cur.displayName).tag(cur)
+                        }
+                    } label: {
+                        Label("介面幣種", systemImage: "dollarsign.circle")
+                    }
+
+                    // 資料更新頻率
+                    Picker(selection: $updateIntervalHours) {
+                        Text("每次啟動").tag(0.0)
+                        Text("每 6 小時").tag(6.0)
+                        Text("每 12 小時").tag(12.0)
+                        Text("每 24 小時").tag(24.0)
+                    } label: {
+                        Label("匯率更新頻率", systemImage: "clock.arrow.circlepath")
+                    }
+
+                    if let updateTime = ExchangeRateProvider.lastUpdateTime {
+                        HStack {
+                            Label("上次更新", systemImage: "checkmark.circle")
+                            Spacer()
+                            Text(updateTime.dateTimeString)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 // MARK: - 安全設定
                 Section("安全") {
                     Toggle(isOn: $appLockEnabled) {
                         Label("Face ID / Touch ID 鎖", systemImage: "faceid")
                     }
-                    if appLockEnabled {
-                        Text("啟動 App 時需要驗證身份")
+                    Toggle(isOn: $priceAlertNotifications) {
+                        Label("股價警報通知", systemImage: "bell.badge")
+                    }
+                    if appLockEnabled || priceAlertNotifications {
+                        Text(appLockEnabled && priceAlertNotifications
+                             ? "啟動 App 時需驗證身份；警報觸發時發送本地通知"
+                             : appLockEnabled ? "啟動 App 時需要驗證身份" : "警報觸發時發送本地通知")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -58,13 +99,7 @@ struct SettingsView: View {
                     HStack {
                         Label("版本", systemImage: "info.circle")
                         Spacer()
-                        Text("1.0.0")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Label("基準幣種", systemImage: "dollarsign.circle")
-                        Spacer()
-                        Text(persistence.baseCurrency.displayName)
+                        Text("1.1.0")
                             .foregroundStyle(.secondary)
                     }
                     HStack {
@@ -93,7 +128,28 @@ struct SettingsView: View {
             } message: {
                 Text("數據已匯出到檔案，可透過分享功能傳送。")
             }
+            .alert("更改介面幣種", isPresented: $showingChangeBaseAlert) {
+                Button("取消", role: .cancel) { }
+                Button("確認更改") {
+                    persistence.setBaseCurrency(pendingBaseCurrency)
+                }
+            } message: {
+                Text("將以 \(pendingBaseCurrency.displayName) 作為全 App 的結算與顯示幣種，歷史數據不會被修改。")
+            }
         }
+    }
+
+    /// 基準幣種選擇 Binding：選擇時先彈出確認對話框
+    private var pickerBinding: Binding<Currency> {
+        Binding(
+            get: { persistence.baseCurrency },
+            set: { newValue in
+                if newValue != persistence.baseCurrency {
+                    pendingBaseCurrency = newValue
+                    showingChangeBaseAlert = true
+                }
+            }
+        )
     }
 
     // MARK: - CSV 匯出

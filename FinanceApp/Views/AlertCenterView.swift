@@ -154,6 +154,9 @@ struct AlertCenterView: View {
     }
 
     private func sendAlertNotification(_ alert: PriceAlert, price: Double) {
+        // 尊重設定頁的「股價警報通知」開關
+        guard UserDefaults.standard.object(forKey: "priceAlertNotifications") as? Bool ?? true else { return }
+
         let content = UNMutableNotificationContent()
         content.title = "🔔 股價警報：\(alert.symbol)"
         content.body = "\(alert.name) \(alert.condition.rawValue) \(alert.targetPrice.compactString())\n當前價格：\(price.compactString())"

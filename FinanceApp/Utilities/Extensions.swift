@@ -67,15 +67,25 @@ enum ExchangeRateProvider: @unchecked Sendable {
         .jpy: 19.8,     // 1 HKD ≈ 19.8 JPY
         .sgd: 0.173,    // 1 HKD ≈ 0.173 SGD
         .aud: 0.196,    // 1 HKD ≈ 0.196 AUD
-        .cad: 0.175     // 1 HKD ≈ 0.175 CAD
+        .cad: 0.175,    // 1 HKD ≈ 0.175 CAD
+        .mop: 1.03      // 1 HKD ≈ 1.03 MOP（澳門幣與港元掛鈎）
     ]
 
     /// 即時匯率（啟動時從 open.er-api.com 免費 API 拉取）
     private static var liveRates: [Currency: Double]? = loadCachedRates()
     private static var isFetching = false
 
-    /// 匯率快取有效期（24 小時）
-    private static let cacheMaxAge: TimeInterval = 86400
+    /// 匯率快取有效期（可在設定頁調整，單位：小時；0 = 每次啟動都拉取，未設定時預設 24 小時）
+    static var updateIntervalHours: Double {
+        if let value = UserDefaults.standard.object(forKey: "rateUpdateIntervalHours") as? Double {
+            return value
+        }
+        return 24   // 預設值
+    }
+
+    static var cacheMaxAge: TimeInterval {
+        updateIntervalHours <= 0 ? 0 : updateIntervalHours * 3600
+    }
 
     /// 目前生效的匯率表（即時 > 快取 > 預設）
     static var currentRates: [Currency: Double] {
@@ -108,8 +118,9 @@ enum ExchangeRateProvider: @unchecked Sendable {
     static func fetchLiveRates(force: Bool = false) async {
         guard !isFetching else { return }
 
-        // 快取檢查：24 小時內不重複拉取
-        if !force, let ts = lastUpdateTime, Date().timeIntervalSince(ts) < cacheMaxAge, hasLiveRates {
+        // 快取檢查：在設定的更新頻率內不重複拉取
+        if !force, cacheMaxAge > 0, let ts = lastUpdateTime,
+           Date().timeIntervalSince(ts) < cacheMaxAge, hasLiveRates {
             return
         }
 
@@ -157,9 +168,11 @@ enum ExchangeRateProvider: @unchecked Sendable {
     }
 
     private static func loadCachedRates() -> [Currency: Double]? {
-        // 快取過期則不使用
+        // 更新頻率為「每次啟動」或快取過期則不使用快取
+        let maxAge = cacheMaxAge
+        if maxAge <= 0 { return nil }
         if let ts = UserDefaults.standard.object(forKey: "exchangeRatesTimestamp") as? Double,
-           Date().timeIntervalSince1970 - ts > cacheMaxAge {
+           Date().timeIntervalSince1970 - ts > maxAge {
             return nil
         }
         guard let dict = UserDefaults.standard.dictionary(forKey: "exchangeRatesCache") as? [String: String] else {

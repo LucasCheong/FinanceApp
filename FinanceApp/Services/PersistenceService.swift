@@ -524,6 +524,12 @@ final class PersistenceService: ObservableObject {
     }
 
     private func loadAll() {
+        // 載入基準幣種設定
+        if let code = UserDefaults.standard.string(forKey: "baseCurrencyCode"),
+           let saved = Currency(rawValue: code) {
+            baseCurrency = saved
+        }
+
         transactions = load(transactionsFile) ?? []
         holdings = load(holdingsFile) ?? []
         invoices = load(invoicesFile) ?? []
@@ -534,6 +540,13 @@ final class PersistenceService: ObservableObject {
         recurringTransactions = load(recurringFile) ?? []
         priceAlerts = load(priceAlertsFile) ?? []
         dcaPositions = load(dcaFile) ?? []
+    }
+
+    /// 設定基準幣種（全 App 的跨幣種結算與介面顯示幣種）
+    func setBaseCurrency(_ currency: Currency) {
+        guard currency != baseCurrency else { return }
+        baseCurrency = currency
+        UserDefaults.standard.set(currency.code, forKey: "baseCurrencyCode")
     }
 
     private func load<T: Decodable>(_ filename: String) -> T? {
