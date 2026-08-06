@@ -148,7 +148,11 @@ enum ExchangeRateProvider: @unchecked Sendable {
 
     // MARK: - 快取存取
     private static func cacheRates(_ rates: [Currency: Double]) {
-        let dict = rates.mapValues { String($0) }
+        // UserDefaults 只支持屬性列表類型，鍵必須轉為 String
+        var dict: [String: String] = [:]
+        for (currency, rate) in rates {
+            dict[currency.code] = String(rate)
+        }
         UserDefaults.standard.set(dict, forKey: "exchangeRatesCache")
     }
 
