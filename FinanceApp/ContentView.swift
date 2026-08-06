@@ -1,6 +1,7 @@
 import SwiftUI
 
-// MARK: - 主視圖 - 底部標籤欄
+// MARK: - 主視圖 - 自定義底部標籤欄（支持 6 個標籤全部展示）
+/// iPhone 原生 TabView 超過 5 個標籤會摺疊為「更多」，故使用自定義標籤欄
 struct ContentView: View {
     // 啟動分頁可在設定頁調整（預設記帳）
     @State private var selectedTab: Int
@@ -16,27 +17,25 @@ struct ContentView: View {
 
     @AppStorage("colorScheme") private var colorScheme = "system"
 
+    /// 標籤定義：圖標與標題
+    private let tabs: [(title: String, icon: String)] = [
+        ("記帳", "book.fill"),
+        ("發票", "doc.viewfinder.fill"),
+        ("市場", "chart.bar.fill"),
+        ("組合", "briefcase.fill"),
+        ("收息", "percent"),
+        ("設定", "gearshape.fill")
+    ]
+
     var body: some View {
-        Group {
-            if colorScheme == "dark" {
-                TabView(selection: $selectedTab) {
-                    tabContent
-                }
-                .preferredColorScheme(.dark)
-                .tint(.financePrimary)
-            } else if colorScheme == "light" {
-                TabView(selection: $selectedTab) {
-                    tabContent
-                }
-                .preferredColorScheme(.light)
-                .tint(.financePrimary)
-            } else {
-                TabView(selection: $selectedTab) {
-                    tabContent
-                }
-                .tint(.financePrimary)
-            }
+        VStack(spacing: 0) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            customTabBar
         }
+        .preferredColorScheme(colorScheme == "dark" ? .dark : colorScheme == "light" ? .light : nil)
+        .tint(.financePrimary)
         .onAppear {
             PersistenceService.shared.processDueRecurringTransactions()
             // 啟動時拉取即時匯率（快取期可在設定頁調整，失敗時自動使用備用匯率）
@@ -46,81 +45,96 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - 分頁內容
     @ViewBuilder
-    private var tabContent: some View {
-        // 記帳
-        AccountingView()
-            .tabItem {
-                Label("記帳", systemImage: "book.fill")
-            }
-            .tag(0)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { showingBudget = true } label: {
-                            Label("預算管理", systemImage: "creditcard.fill")
+    private var content: some View {
+        switch selectedTab {
+        case 0:
+            // 記帳
+            AccountingView()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button { showingBudget = true } label: {
+                                Label("預算管理", systemImage: "creditcard.fill")
+                            }
+                            Button { showingExchangeRate = true } label: {
+                                Label("匯率走勢", systemImage: "chart.line.uptrend.xyaxis")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
                         }
-                        Button { showingExchangeRate = true } label: {
-                            Label("匯率走勢", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                }
+                .sheet(isPresented: $showingBudget) { BudgetView() }
+                .sheet(isPresented: $showingExchangeRate) { ExchangeRateView() }
+
+        case 1:
+            // 發票導入
+            InvoiceImportView()
+
+        case 2:
+            // 市場看板
+            MarketDashboardView()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showingAlertCenter = true } label: {
+                            Image(systemName: "bell.badge")
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
                 }
-            }
-            .sheet(isPresented: $showingBudget) { BudgetView() }
-            .sheet(isPresented: $showingExchangeRate) { ExchangeRateView() }
+                .sheet(isPresented: $showingAlertCenter) { AlertCenterView() }
 
-        // 發票導入
-        InvoiceImportView()
-            .tabItem {
-                Label("發票", systemImage: "doc.viewfinder.fill")
-            }
-            .tag(1)
-
-        // 市場看板
-        MarketDashboardView()
-            .tabItem {
-                Label("市場", systemImage: "chart.bar.fill")
-            }
-            .tag(2)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingAlertCenter = true } label: {
-                        Image(systemName: "bell.badge")
+        case 3:
+            // 投資組合
+            PortfolioView()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showingAssetAllocation = true } label: {
+                            Image(systemName: "chart.pie.fill")
+                        }
                     }
                 }
-            }
-            .sheet(isPresented: $showingAlertCenter) { AlertCenterView() }
+                .sheet(isPresented: $showingAssetAllocation) { AssetAllocationView() }
 
-        // 投資組合
-        PortfolioView()
-            .tabItem {
-                Label("組合", systemImage: "briefcase.fill")
-            }
-            .tag(3)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingAssetAllocation = true } label: {
-                        Image(systemName: "chart.pie.fill")
+        case 4:
+            // 收息
+            DividendCalculatorView()
+
+        default:
+            // 設定（SettingsView 內含導航容器）
+            SettingsView()
+        }
+    }
+
+    // MARK: - 自定義標籤欄
+    private var customTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(tabs.indices, id: \.self) { index in
+                Button {
+                    if selectedTab != index {
+                        Haptics.impact()
+                        selectedTab = index
                     }
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: tabs[index].icon)
+                            .font(.system(size: 20))
+                        Text(tabs[index].title)
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(selectedTab == index ? Color.financePrimary : Color.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
-            .sheet(isPresented: $showingAssetAllocation) { AssetAllocationView() }
-
-        // 收息
-        DividendCalculatorView()
-            .tabItem {
-                Label("收息", systemImage: "percent")
-            }
-            .tag(4)
-
-        // 設定（獨立分頁，SettingsView 內含導航容器）
-        SettingsView()
-            .tabItem {
-                Label("設定", systemImage: "gearshape.fill")
-            }
-            .tag(5)
+        }
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 }
 

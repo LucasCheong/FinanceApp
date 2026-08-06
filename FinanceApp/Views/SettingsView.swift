@@ -97,9 +97,9 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
 
                     Picker(selection: iconBinding) {
-                        Text("預設").tag("")
+                        Text("朝陽橙").tag("")
+                        Text("經典藍綠").tag("AppIcon")
                         Text("深邃藍").tag("AppIconDark")
-                        Text("朝陽橙").tag("AppIconGradient")
                     } label: {
                         Label("App 圖標", systemImage: "app.badge")
                     }
@@ -201,7 +201,7 @@ struct SettingsView: View {
                     HStack {
                         Label("版本", systemImage: "info.circle")
                         Spacer()
-                        Text("1.2.0")
+                        Text("1.3.0")
                             .foregroundStyle(.secondary)
                     }
                     HStack {
