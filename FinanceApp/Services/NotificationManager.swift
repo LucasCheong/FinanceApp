@@ -85,4 +85,38 @@ final class NotificationManager {
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
+
+    // MARK: - 每週記帳提醒
+    static let weeklyReminderId = "weekly_accounting_reminder"
+
+    /// 設定每週記帳提醒（weekday: 1=星期日 … 7=星期六）
+    func scheduleWeeklyReminder(weekday: Int, hour: Int, minute: Int = 0) {
+        requestAuthorization()
+
+        let content = UNMutableNotificationContent()
+        content.title = "📝 記帳提醒"
+        content.body = "本週還未記帳哦，花一分鐘記錄一下開支吧！"
+        content.sound = .default
+
+        var dateComponents = DateComponents()
+        dateComponents.weekday = weekday
+        dateComponents.hour = hour
+        dateComponents.minute = minute
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+        let request = UNNotificationRequest(identifier: Self.weeklyReminderId, content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("設定每週提醒失敗: \(error.localizedDescription)")
+            } else {
+                print("每週提醒已設定：星期\(weekday) \(hour):\(String(format: "%02d", minute))")
+            }
+        }
+    }
+
+    /// 取消每週記帳提醒
+    func cancelWeeklyReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.weeklyReminderId])
+    }
 }

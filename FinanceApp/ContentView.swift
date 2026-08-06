@@ -2,7 +2,13 @@ import SwiftUI
 
 // MARK: - 主視圖 - 底部標籤欄
 struct ContentView: View {
-    @State private var selectedTab = 0
+    // 啟動分頁可在設定頁調整（預設記帳）
+    @State private var selectedTab: Int
+
+    init() {
+        _selectedTab = State(initialValue: UserDefaults.standard.integer(forKey: "defaultTab"))
+    }
+
     @State private var showingBudget = false
     @State private var showingAlertCenter = false
     @State private var showingAssetAllocation = false
@@ -34,8 +40,10 @@ struct ContentView: View {
         }
         .onAppear {
             PersistenceService.shared.processDueRecurringTransactions()
-            // 啟動時拉取即時匯率（24 小時快取，失敗時自動使用備用匯率）
+            // 啟動時拉取即時匯率（快取期可在設定頁調整，失敗時自動使用備用匯率）
             Task { await ExchangeRateProvider.fetchLiveRates() }
+            // 刷新桌面小組件數據
+            PersistenceService.shared.updateWidgetSnapshot()
         }
     }
 

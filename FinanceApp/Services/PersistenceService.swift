@@ -327,6 +327,8 @@ final class PersistenceService: ObservableObject {
     func addTransaction(_ transaction: Transaction) {
         transactions.insert(transaction, at: 0)
         saveTransactions()
+        Haptics.success()
+        updateWidgetSnapshot()
     }
 
     func deleteTransaction(at indexSet: IndexSet) {
@@ -547,6 +549,93 @@ final class PersistenceService: ObservableObject {
         guard currency != baseCurrency else { return }
         baseCurrency = currency
         UserDefaults.standard.set(currency.code, forKey: "baseCurrencyCode")
+    }
+
+    // MARK: - 數據導入 / 備份
+
+    /// 生成完整備份數據（與匯出 JSON 格式一致，供檔案匯出與 iCloud 同步共用）
+    func createBackupData() throws -> Data {
+        let payload: [String: Any] = [
+            "exportDate": ISO8601DateFormatter().string(from: Date()),
+            "baseCurrency": baseCurrency.code,
+            "data": [
+                "transactions": transactions,
+                "holdings": holdings,
+                "budgets": budgets,
+                "customCategories": customCategories,
+                "dividendPositions": dividendPositions,
+                "recurringTransactions": recurringTransactions,
+                "priceAlerts": priceAlerts,
+                "dcaPositions": dcaPositions
+            ]
+        ]
+        return try JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted)
+    }
+
+    /// 從備份檔案導入數據（覆蓋現有數據）
+    /// 返回導入的交易筆數；失敗拋出錯誤
+    @discardableResult
+    func importData(from url: URL) throws -> Int {
+        // fileImporter 返回的 URL 需要安全存取權限
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        let raw = try Data(contentsOf: url)
+        guard let json = try JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              let data = json["data"] as? [String: Any] else {
+            throw NSError(domain: "FinanceApp.Import", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "備份檔案格式不正確"])
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        func decode<T: Decodable>(_ key: String) -> [T] {
+            guard let arr = data[key] as? [[String: Any]],
+                  let d = try? JSONSerialization.data(withJSONObject: arr) else { return [] }
+            return (try? decoder.decode([T].self, from: d)) ?? []
+        }
+
+        transactions = decode("transactions")
+        holdings = decode("holdings")
+        budgets = decode("budgets")
+        customCategories = decode("customCategories")
+        dividendPositions = decode("dividendPositions")
+        recurringTransactions = decode("recurringTransactions")
+        priceAlerts = decode("priceAlerts")
+        dcaPositions = decode("dcaPositions")
+
+        if let code = json["baseCurrency"] as? String, let cur = Currency(rawValue: code) {
+            baseCurrency = cur
+            UserDefaults.standard.set(cur.code, forKey: "baseCurrencyCode")
+        }
+
+        saveTransactions(); saveHoldings(); saveBudgets()
+        saveCustomCategories(); saveDividends(); saveRecurring()
+        savePriceAlerts(); saveDCA()
+        updateWidgetSnapshot()
+        return transactions.count
+    }
+
+    // MARK: - Widget 小組件數據快照（App Group 共享）
+
+    /// 將最新統計寫入 App Group UserDefaults，供桌面小組件讀取
+    func updateWidgetSnapshot() {
+        guard let defaults = UserDefaults(suiteName: "group.com.financeapp.FinanceApp") else { return }
+
+        let todayExpense = transactions
+            .filter { $0.type == .expense && Calendar.current.isDateInToday($0.date) }
+            .reduce(0.0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+        let monthExpense = transactions
+            .filter { $0.type == .expense && $0.date.isThisMonth }
+            .reduce(0.0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+
+        defaults.set(todayExpense, forKey: "widgetTodayExpense")
+        defaults.set(monthExpense, forKey: "widgetMonthExpense")
+        defaults.set(transactions.count, forKey: "widgetTransactionCount")
+        defaults.set(holdings.count, forKey: "widgetHoldingsCount")
+        defaults.set(baseCurrency.code, forKey: "widgetBaseCurrencyCode")
+        defaults.set(Date().timeIntervalSince1970, forKey: "widgetUpdatedAt")
     }
 
     private func load<T: Decodable>(_ filename: String) -> T? {

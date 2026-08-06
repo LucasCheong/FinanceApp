@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Foundation
 
 // MARK: - Double 格式化擴展
@@ -17,12 +18,13 @@ extension Double {
         currencyString(currency: currency.code)
     }
 
-    /// 帶幣種符號的簡潔顯示（如 "HK$1,234.56"）
+    /// 帶幣種符號的簡潔顯示（如 "HK$1,234.56"，小數位數可在設定頁調整）
     func moneyString(currency: Currency) -> String {
+        let decimals = UserDefaults.standard.object(forKey: "decimalPlaces") as? Int ?? 2
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = decimals
+        formatter.maximumFractionDigits = decimals
         let numberStr = formatter.string(from: NSNumber(value: self)) ?? "\(self)"
         return "\(currency.symbol)\(numberStr)"
     }
@@ -199,6 +201,31 @@ extension Double {
     func convertedString(from sourceCurrency: Currency, to targetCurrency: Currency) -> String {
         let converted = ExchangeRateProvider.convert(self, from: sourceCurrency, to: targetCurrency)
         return converted.moneyString(currency: targetCurrency)
+    }
+}
+
+// MARK: - 觸覺反饋工具（可在設定頁開關）
+enum Haptics {
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
+    }
+
+    /// 成功反饋（記帳成功、解鎖成功等）
+    static func success() {
+        guard isEnabled else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// 輕觸反饋（按鈕點擊、切換等）
+    static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+        guard isEnabled else { return }
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+
+    /// 警告反饋（警報觸發、超預算等）
+    static func warning() {
+        guard isEnabled else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 }
 

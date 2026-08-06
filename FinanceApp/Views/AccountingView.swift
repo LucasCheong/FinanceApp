@@ -6,6 +6,7 @@ struct AccountingView: View {
     @State private var showingAddTransaction = false
     @State private var showingAnalysis = false
     @State private var selectedFilter: TransactionFilter = .all
+    @State private var searchText = ""
 
     enum TransactionFilter: String, CaseIterable {
         case all = "全部"
@@ -15,16 +16,29 @@ struct AccountingView: View {
     }
 
     var filteredTransactions: [Transaction] {
+        var result: [Transaction]
         switch selectedFilter {
         case .all:
-            return persistence.transactions
+            result = persistence.transactions
         case .income:
-            return persistence.transactions.filter { $0.type == .income }
+            result = persistence.transactions.filter { $0.type == .income }
         case .expense:
-            return persistence.transactions.filter { $0.type == .expense }
+            result = persistence.transactions.filter { $0.type == .expense }
         case .thisMonth:
-            return persistence.transactions.filter { $0.date.isThisMonth }
+            result = persistence.transactions.filter { $0.date.isThisMonth }
         }
+
+        // 關鍵字搜索：類別、備註、幣種、日期
+        let keyword = searchText.trimmingCharacters(in: .whitespaces)
+        if !keyword.isEmpty {
+            result = result.filter { tx in
+                tx.category.localizedCaseInsensitiveContains(keyword)
+                || tx.note.localizedCaseInsensitiveContains(keyword)
+                || tx.currency.code.localizedCaseInsensitiveContains(keyword)
+                || tx.date.shortDateString.contains(keyword)
+            }
+        }
+        return result
     }
 
     var body: some View {
@@ -42,6 +56,9 @@ struct AccountingView: View {
 
                     // 篩選器
                     filterPicker
+
+                    // 搜索欄
+                    searchField
 
                     // 交易列表
                     if filteredTransactions.isEmpty {
@@ -193,6 +210,28 @@ struct AccountingView: View {
             }
         }
         .pickerStyle(.segmented)
+    }
+
+    // MARK: - 搜索欄
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("搜索類別、備註、幣種、日期…", text: $searchText)
+                .font(.subheadline)
+                .autocorrectionDisabled()
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.cardBackground)
+        .cornerRadius(10)
     }
 
     // MARK: - 交易列表
