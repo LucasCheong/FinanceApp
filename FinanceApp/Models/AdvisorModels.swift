@@ -266,6 +266,17 @@ struct FinancialSnapshot {
     var annualDividendIncome: Double = 0
     var totalAssets: Double = 0
 
+    // 股票持倉依息率拆分（息率 ≥ 4% 歸為收息型）
+    var growthStockValue: Double = 0
+    var incomeStockValue: Double = 0
+    /// 高息股票持倉的估算年股息（已計入 annualDividendIncome）
+    var estimatedStockDividend: Double = 0
+    /// 被重新歸類為收息型的股票名稱
+    var incomeClassifiedHoldings: [String] = []
+
+    /// 收息型資產總額（收息倉 + 高息股票持倉）
+    var totalIncomeAssets: Double { dividendValue + incomeStockValue }
+
     // 比例
     var growthRatio: Double = 0
     var incomeRatio: Double = 0

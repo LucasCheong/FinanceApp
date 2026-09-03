@@ -6,6 +6,9 @@ import SwiftUI
 /// 大模型（若已設定）僅用於把以下結論潤飾成自然語言，不參與數值計算。
 enum AdvisorEngine {
 
+    /// 股息率門檻：達此水平的股票持倉歸類為「收息型」而非「增長型」
+    static let incomeYieldThreshold = 0.04
+
     // MARK: - 財務快照
 
     /// 從真實記帳與持倉數據計算財務快照
@@ -56,8 +59,18 @@ enum AdvisorEngine {
         // --- 資產 ---
         snapshot.cashBalance = max(0, persistence.cashBalance)
 
+        // 股息率查表：報價沒帶息率時回退到預置標的資料庫
+        var yieldBySymbol: [String: Double] = [:]
+        for stock in StockDatabase.allStocks where stock.dividendYield > 0 {
+            yieldBySymbol[stock.symbol] = stock.dividendYield
+        }
+
         var stockValue = 0.0
         var stockCost = 0.0
+        var growthStockValue = 0.0
+        var incomeStockValue = 0.0
+        var estimatedStockDividend = 0.0
+        var incomeClassified: [String] = []
         var valueBySymbol: [String: (name: String, value: Double)] = [:]
         var marketValue: [String: Double] = [:]
         var currencyValue: [String: Double] = [:]
@@ -77,6 +90,17 @@ enum AdvisorEngine {
             valueBySymbol[holding.symbol] = (holding.name, value)
             marketValue[holding.market.rawValue, default: 0] += value
             currencyValue[holdingCurrency.code, default: 0] += value
+
+            // 依股息率分桶：高息股雖登記在股票分頁，仍應計入收息型資產
+            let quoteYield = quotes[holding.symbol]?.dividendYield ?? 0
+            let holdingYield = quoteYield > 0 ? quoteYield : (yieldBySymbol[holding.symbol] ?? 0)
+            if holdingYield >= incomeYieldThreshold {
+                incomeStockValue += value
+                estimatedStockDividend += value * holdingYield
+                incomeClassified.append("\(holding.name)（\(percentText(holdingYield))）")
+            } else {
+                growthStockValue += value
+            }
 
             // 單一持倉虧損超過 20% 時標記
             if rawCost > 0 {
@@ -101,7 +125,11 @@ enum AdvisorEngine {
         snapshot.stockValue = stockValue
         snapshot.stockCost = stockCost
         snapshot.dividendValue = dividendValue
-        snapshot.annualDividendIncome = annualDividend
+        snapshot.growthStockValue = growthStockValue
+        snapshot.incomeStockValue = incomeStockValue
+        snapshot.estimatedStockDividend = estimatedStockDividend
+        snapshot.incomeClassifiedHoldings = incomeClassified
+        snapshot.annualDividendIncome = annualDividend + estimatedStockDividend
         snapshot.unrealizedPnL = stockValue - stockCost
         snapshot.unrealizedPnLPercent = stockCost > 0 ? (stockValue - stockCost) / stockCost : 0
         snapshot.losingHoldings = losing
@@ -110,8 +138,8 @@ enum AdvisorEngine {
         snapshot.totalAssets = total
 
         if total > 0 {
-            snapshot.growthRatio = stockValue / total
-            snapshot.incomeRatio = dividendValue / total
+            snapshot.growthRatio = growthStockValue / total
+            snapshot.incomeRatio = (dividendValue + incomeStockValue) / total
             snapshot.defensiveRatio = snapshot.cashBalance / total
         }
 
@@ -134,7 +162,7 @@ enum AdvisorEngine {
         }
 
         let annualExpense = snapshot.monthlyExpense * 12
-        snapshot.dividendCoverage = annualExpense > 0 ? annualDividend / annualExpense : 0
+        snapshot.dividendCoverage = annualExpense > 0 ? snapshot.annualDividendIncome / annualExpense : 0
 
         return snapshot
     }
@@ -374,6 +402,16 @@ enum AdvisorEngine {
             ))
         }
 
+        // 11. 高息股票被重新歸類的說明
+        if !snapshot.incomeClassifiedHoldings.isEmpty {
+            findings.append(AdvisorFinding(
+                severity: .info,
+                title: "\(snapshot.incomeClassifiedHoldings.count) 項股票持倉已計入收息型",
+                detail: "息率達 \(percentText(incomeYieldThreshold)) 以上的持倉會歸入收息型而非增長型：\(snapshot.incomeClassifiedHoldings.prefix(5).joined(separator: "、"))。這些持倉估算每年可帶來股息 \(money(snapshot.estimatedStockDividend, snapshot))，已計入股息覆蓋率。",
+                action: "息率數據來自標的資料庫的歷史水平，若派息政策有變動請自行核對。"
+            ))
+        }
+
         return findings.sorted { $0.severity < $1.severity }
     }
 
@@ -381,9 +419,10 @@ enum AdvisorEngine {
     private static func neededCapital(_ snapshot: FinancialSnapshot) -> Double {
         let annualExpense = snapshot.monthlyExpense * 12
         let gap = max(0, annualExpense - snapshot.annualDividendIncome)
-        // 以目前組合的實際平均息率估算，無數據時用 5%
-        let yieldRate = snapshot.dividendValue > 0
-            ? max(0.01, snapshot.annualDividendIncome / snapshot.dividendValue)
+        // 以目前收息型資產的實際平均息率估算，無數據時用 5%
+        let incomeAssets = snapshot.totalIncomeAssets
+        let yieldRate = incomeAssets > 0
+            ? max(0.01, snapshot.annualDividendIncome / incomeAssets)
             : 0.05
         return gap / yieldRate
     }
@@ -403,7 +442,7 @@ enum AdvisorEngine {
                 color: .orange
             ),
             RebalanceItem(
-                bucket: "收息型",
+                bucket: "收息型（含高息股）",
                 currentRatio: snapshot.incomeRatio,
                 targetRatio: target.income,
                 deltaAmount: (target.income - snapshot.incomeRatio) * snapshot.totalAssets,
@@ -519,7 +558,7 @@ enum AdvisorEngine {
         lines.append("【目標配置】增長型資產 \(percentText(target.growth))、收息型資產 \(percentText(target.income))、防禦型現金 \(percentText(target.defensive))。")
 
         if snapshot.totalAssets > 0 {
-            lines.append("【目前實況】總資產 \(money(snapshot.totalAssets, snapshot))，其中股票 \(percentText(snapshot.growthRatio))、收息 \(percentText(snapshot.incomeRatio))、現金 \(percentText(snapshot.defensiveRatio))。")
+            lines.append("【目前實況】總資產 \(money(snapshot.totalAssets, snapshot))，其中增長型 \(percentText(snapshot.growthRatio))、收息型 \(percentText(snapshot.incomeRatio))、現金 \(percentText(snapshot.defensiveRatio))。")
         }
 
         // 執行要點

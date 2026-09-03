@@ -145,8 +145,18 @@ final class AdvisorStore: ObservableObject {
         let holdings = PersistenceService.shared.holdings
         guard !holdings.isEmpty else { return [:] }
 
-        let infos = holdings.map {
-            StockInfo(symbol: $0.symbol, name: $0.name, market: $0.market, dividendYield: 0)
+        var yieldBySymbol: [String: Double] = [:]
+        for stock in StockDatabase.allStocks where stock.dividendYield > 0 {
+            yieldBySymbol[stock.symbol] = stock.dividendYield
+        }
+
+        let infos = holdings.map { holding in
+            StockInfo(
+                symbol: holding.symbol,
+                name: holding.name,
+                market: holding.market,
+                dividendYield: yieldBySymbol[holding.symbol] ?? 0
+            )
         }
         await StockService.shared.fetchQuotes(for: infos)
 
@@ -459,9 +469,15 @@ struct AdvisorView: View {
             Label("目標配置對比", systemImage: "chart.pie.fill")
                 .font(.headline)
 
-            allocationRow("增長型（股票）", current: snapshot.growthRatio, target: target.growth, color: .orange)
-            allocationRow("收息型", current: snapshot.incomeRatio, target: target.income, color: .green)
+            allocationRow("增長型（低息股票）", current: snapshot.growthRatio, target: target.growth, color: .orange)
+            allocationRow("收息型（含高息股）", current: snapshot.incomeRatio, target: target.income, color: .green)
             allocationRow("防禦型（現金）", current: snapshot.defensiveRatio, target: target.defensive, color: .blue)
+
+            if snapshot.totalAssets > 0 {
+                Text("股息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的股票持倉會歸入收息型。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             if snapshot.totalAssets <= 0 {
                 Text("目前尚無資產數據，以上僅為目標比例。開始記帳並登記持倉後，這裡會顯示實際偏離。")

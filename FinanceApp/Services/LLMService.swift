@@ -174,8 +174,13 @@ final class LLMService: ObservableObject {
         """)
 
         lines.append("""
-        [資產] 總資產 \(money(snapshot.totalAssets))；現金 \(money(snapshot.cashBalance))（\(percent(snapshot.defensiveRatio))）；股票市值 \(money(snapshot.stockValue))（\(percent(snapshot.growthRatio))）；收息資產 \(money(snapshot.dividendValue))（\(percent(snapshot.incomeRatio))）
+        [資產] 總資產 \(money(snapshot.totalAssets))；現金 \(money(snapshot.cashBalance))（防禦型 \(percent(snapshot.defensiveRatio))）；股票總市值 \(money(snapshot.stockValue))，其中增長型（息率低於 4%）\(money(snapshot.growthStockValue))、高息股（息率 4% 以上，歸入收息型）\(money(snapshot.incomeStockValue))；收息倉登記資產 \(money(snapshot.dividendValue))；合計增長型 \(percent(snapshot.growthRatio))、收息型 \(percent(snapshot.incomeRatio))
         """)
+
+        if !snapshot.incomeClassifiedHoldings.isEmpty {
+            lines.append("[歸入收息型的股票持倉] " + snapshot.incomeClassifiedHoldings.joined(separator: "、")
+                + "，估算年股息 " + money(snapshot.estimatedStockDividend))
+        }
 
         lines.append("""
         [風險指標] 備用金可支撐 \(String(format: "%.1f", min(snapshot.emergencyMonths, 99))) 個月；持倉標的 \(snapshot.holdingsCount) 個；最大持倉「\(snapshot.topHoldingName.isEmpty ? "無" : snapshot.topHoldingName)」佔投資資產 \(percent(snapshot.topHoldingRatio))；未實現盈虧 \(money(snapshot.unrealizedPnL))（\(percent(snapshot.unrealizedPnLPercent))）；年股息收入 \(money(snapshot.annualDividendIncome))，覆蓋年開支 \(percent(snapshot.dividendCoverage))

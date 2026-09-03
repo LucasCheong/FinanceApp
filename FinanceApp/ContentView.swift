@@ -107,7 +107,7 @@ struct ContentView: View {
             AdvisorView()
 
         default:
-            // 設定（SettingsView 内含導航容器）
+            // 設定（SettingsView 自帶導航容器）
             SettingsView()
         }
     }
