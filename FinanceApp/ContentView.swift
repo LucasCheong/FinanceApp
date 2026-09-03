@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 主視圖 - 自定義底部標籤欄（支持 6 個標籤全部展示）
+// MARK: - 主視圖 - 自定義底部標籤欄（支持 7 個標籤全部展示）
 /// iPhone 原生 TabView 超過 5 個標籤會摺疊為「更多」，故使用自定義標籤欄
 struct ContentView: View {
     // 啟動分頁可在設定頁調整（預設記帳）
@@ -24,6 +24,7 @@ struct ContentView: View {
         ("市場", "chart.bar.fill"),
         ("組合", "briefcase.fill"),
         ("收息", "percent"),
+        ("顧問", "person.crop.circle.badge.checkmark"),
         ("設定", "gearshape.fill")
     ]
 
@@ -101,8 +102,12 @@ struct ContentView: View {
             // 收息
             DividendCalculatorView()
 
+        case 5:
+            // 財務顧問
+            AdvisorView()
+
         default:
-            // 設定（SettingsView 內含導航容器）
+            // 設定（SettingsView 内含導航容器）
             SettingsView()
         }
     }
@@ -119,9 +124,9 @@ struct ContentView: View {
                 } label: {
                     VStack(spacing: 2) {
                         Image(systemName: tabs[index].icon)
-                            .font(.system(size: 20))
+                            .font(.system(size: 19))
                         Text(tabs[index].title)
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                     }
                     .foregroundStyle(selectedTab == index ? Color.financePrimary : Color.secondary)
                     .frame(maxWidth: .infinity)

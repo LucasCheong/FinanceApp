@@ -30,6 +30,12 @@ struct SettingsView: View {
     @State private var syncMessage = ""
     @State private var showingSyncResult = false
 
+    // AI 顧問
+    @StateObject private var llm = LLMService.shared
+    @State private var isTestingLLM = false
+    @State private var llmTestMessage = ""
+    @State private var showingLLMTestResult = false
+
     private let weekdays = [(1, "星期日"), (2, "星期一"), (3, "星期二"), (4, "星期三"), (5, "星期四"), (6, "星期五"), (7, "星期六")]
 
     var body: some View {
@@ -51,6 +57,8 @@ struct SettingsView: View {
                         Text("市場").tag(2)
                         Text("組合").tag(3)
                         Text("收息").tag(4)
+                        Text("顧問").tag(5)
+                        Text("設定").tag(6)
                     } label: {
                         Label("啟動分頁", systemImage: "house")
                     }
@@ -103,6 +111,77 @@ struct SettingsView: View {
                     } label: {
                         Label("App 圖標", systemImage: "app.badge")
                     }
+                }
+
+                // MARK: - AI 顧問
+                Section {
+                    Menu {
+                        ForEach(LLMService.presets) { preset in
+                            Button(preset.name) {
+                                llm.baseURL = preset.baseURL
+                                llm.model = preset.model
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Label("快速填入服務商", systemImage: "wand.and.stars")
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Text("Base URL")
+                            .frame(width: 84, alignment: .leading)
+                        TextField(LLMService.defaultBaseURL, text: $llm.baseURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .multilineTextAlignment(.trailing)
+                            .font(.caption)
+                    }
+
+                    HStack {
+                        Text("模型")
+                            .frame(width: 84, alignment: .leading)
+                        TextField(LLMService.defaultModel, text: $llm.model)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                            .font(.caption)
+                    }
+
+                    HStack {
+                        Text("API Key")
+                            .frame(width: 84, alignment: .leading)
+                        SecureField("sk-…", text: $llm.apiKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                            .font(.caption)
+                    }
+
+                    Button {
+                        testLLMConnection()
+                    } label: {
+                        HStack {
+                            Label("測試連線", systemImage: "antenna.radiowaves.left.and.right")
+                            Spacer()
+                            if isTestingLLM {
+                                ProgressView()
+                            } else if llm.isConfigured {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+                    .disabled(isTestingLLM || !llm.isConfigured)
+                } header: {
+                    Text("AI 顧問")
+                } footer: {
+                    Text("顧問分頁的評分、體檢與再平衡建議全部由本機引擎計算，不需 API Key 即可使用。填入 Key 後，額外提供用顧問語氣寫成的文字說明與追問對話；此時你的收支、持倉與問卷明細會隨請求送至上方設定的服務商。兼容 OpenAI、DeepSeek、Kimi、智譜、Ollama 等任何 OpenAI 格式接口。API Key 存於本機 Keychain。")
                 }
 
                 // MARK: - 安全與通知
@@ -201,7 +280,7 @@ struct SettingsView: View {
                     HStack {
                         Label("版本", systemImage: "info.circle")
                         Spacer()
-                        Text("1.3.0")
+                        Text("1.4.0")
                             .foregroundStyle(.secondary)
                     }
                     HStack {
@@ -245,6 +324,11 @@ struct SettingsView: View {
                 Button("確定") { }
             } message: {
                 Text(syncMessage)
+            }
+            .alert("AI 連線測試", isPresented: $showingLLMTestResult) {
+                Button("確定") { }
+            } message: {
+                Text(llmTestMessage)
             }
         }
     }
@@ -301,6 +385,24 @@ struct SettingsView: View {
         guard weeklyReminderEnabled else { return }
         NotificationManager.shared.scheduleWeeklyReminder(
             weekday: weeklyReminderWeekday, hour: weeklyReminderHour)
+    }
+
+    // MARK: - AI 連線測試
+    private func testLLMConnection() {
+        isTestingLLM = true
+        Task {
+            let result = await llm.testConnection()
+            await MainActor.run {
+                switch result {
+                case .success(let reply):
+                    llmTestMessage = "連線成功。模型回覆：\(reply)"
+                case .failure(let error):
+                    llmTestMessage = error.localizedDescription
+                }
+                isTestingLLM = false
+                showingLLMTestResult = true
+            }
+        }
     }
 
     // MARK: - 數據導入
