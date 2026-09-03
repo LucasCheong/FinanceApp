@@ -139,6 +139,24 @@ struct StockQuote: Identifiable, Codable {
     var isPositive: Bool { change >= 0 }
 }
 
+// MARK: - 股息率計算結果
+/// 依 Yahoo chart API 的實際派息記錄算出的近 12 個月（TTM）股息率
+struct DividendYieldRecord: Codable {
+    /// 年化息率（小數，0.045 = 4.5%）
+    var yield: Double
+    /// 近 12 個月每股派息總額
+    var annualDividendPerShare: Double
+    /// 近 12 個月派息次數
+    var payoutCount: Int
+    /// 計算息率時採用的股價
+    var priceAtCalculation: Double
+    var currency: String
+    var updatedAt: Date
+
+    /// 無派息記錄（市場已確認不派息，不同於「從未查詢」）
+    var hasNoDividend: Bool { payoutCount == 0 }
+}
+
 // MARK: - 發票模型
 struct Invoice: Identifiable, Codable {
     var id: UUID = UUID()

@@ -273,6 +273,8 @@ struct FinancialSnapshot {
     var estimatedStockDividend: Double = 0
     /// 被重新歸類為收息型的股票名稱
     var incomeClassifiedHoldings: [String] = []
+    /// 拉不到實際派息記錄、只能沿用預設息率的標的
+    var fallbackYieldHoldings: [String] = []
 
     /// 收息型資產總額（收息倉 + 高息股票持倉）
     var totalIncomeAssets: Double { dividendValue + incomeStockValue }

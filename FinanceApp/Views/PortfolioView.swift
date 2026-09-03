@@ -282,9 +282,16 @@ struct PortfolioView: View {
         await MainActor.run { isRefreshing = true }
 
         let stockInfos = persistence.holdings.map { holding in
-            StockInfo(symbol: holding.symbol, name: holding.name, market: holding.market, dividendYield: 0)
+            StockInfo(
+                symbol: holding.symbol,
+                name: holding.name,
+                market: holding.market,
+                dividendYield: stockService.liveDividendYield(for: holding.symbol) ?? 0
+            )
         }
 
+        // 息率依實際派息記錄計算，6 小時內重用快取，不用每次下拉都重拉
+        await stockService.refreshDividendYields(for: persistence.holdings.map { $0.symbol })
         await stockService.fetchQuotes(for: stockInfos)
 
         await MainActor.run {

@@ -59,7 +59,7 @@ enum AdvisorEngine {
         // --- 資產 ---
         snapshot.cashBalance = max(0, persistence.cashBalance)
 
-        // 股息率查表：報價沒帶息率時回退到預置標的資料庫
+        // 息率回退表：報價帶不回真實派息數據時才用
         var yieldBySymbol: [String: Double] = [:]
         for stock in StockDatabase.allStocks where stock.dividendYield > 0 {
             yieldBySymbol[stock.symbol] = stock.dividendYield
@@ -71,6 +71,7 @@ enum AdvisorEngine {
         var incomeStockValue = 0.0
         var estimatedStockDividend = 0.0
         var incomeClassified: [String] = []
+        var fallbackYield: [String] = []
         var valueBySymbol: [String: (name: String, value: Double)] = [:]
         var marketValue: [String: Double] = [:]
         var currencyValue: [String: Double] = [:]
@@ -91,9 +92,19 @@ enum AdvisorEngine {
             marketValue[holding.market.rawValue, default: 0] += value
             currencyValue[holdingCurrency.code, default: 0] += value
 
-            // 依股息率分桶：高息股雖登記在股票分頁，仍應計入收息型資產
-            let quoteYield = quotes[holding.symbol]?.dividendYield ?? 0
-            let holdingYield = quoteYield > 0 ? quoteYield : (yieldBySymbol[holding.symbol] ?? 0)
+            // 依股息率分桶：高息股雖登記在股票分頁，仍應計入收息型資產。
+            // 報價的 dividendYield 已由 StockService 套上近 12 個月實際派息算出的 TTM 息率；
+            // 拉不到時才回退到預設值，並記下來在報告裡標明。
+            let holdingYield: Double
+            if let quoteYield = quotes[holding.symbol]?.dividendYield, quoteYield > 0 {
+                holdingYield = quoteYield
+            } else if let fallback = yieldBySymbol[holding.symbol], fallback > 0 {
+                holdingYield = fallback
+                fallbackYield.append(holding.name)
+            } else {
+                holdingYield = 0
+            }
+
             if holdingYield >= incomeYieldThreshold {
                 incomeStockValue += value
                 estimatedStockDividend += value * holdingYield
@@ -129,6 +140,7 @@ enum AdvisorEngine {
         snapshot.incomeStockValue = incomeStockValue
         snapshot.estimatedStockDividend = estimatedStockDividend
         snapshot.incomeClassifiedHoldings = incomeClassified
+        snapshot.fallbackYieldHoldings = fallbackYield
         snapshot.annualDividendIncome = annualDividend + estimatedStockDividend
         snapshot.unrealizedPnL = stockValue - stockCost
         snapshot.unrealizedPnLPercent = stockCost > 0 ? (stockValue - stockCost) / stockCost : 0
@@ -408,7 +420,17 @@ enum AdvisorEngine {
                 severity: .info,
                 title: "\(snapshot.incomeClassifiedHoldings.count) 項股票持倉已計入收息型",
                 detail: "息率達 \(percentText(incomeYieldThreshold)) 以上的持倉會歸入收息型而非增長型：\(snapshot.incomeClassifiedHoldings.prefix(5).joined(separator: "、"))。這些持倉估算每年可帶來股息 \(money(snapshot.estimatedStockDividend, snapshot))，已計入股息覆蓋率。",
-                action: "息率數據來自標的資料庫的歷史水平，若派息政策有變動請自行核對。"
+                action: "息率依近 12 個月實際派息記錄除以現價計算，每次生成報告時重拉。"
+            ))
+        }
+
+        // 12. 息率數據回退提醒
+        if !snapshot.fallbackYieldHoldings.isEmpty {
+            findings.append(AdvisorFinding(
+                severity: .info,
+                title: "\(snapshot.fallbackYieldHoldings.count) 項持倉的息率非實時數據",
+                detail: "\(snapshot.fallbackYieldHoldings.prefix(5).joined(separator: "、"))拉不到近 12 個月的派息記錄，目前沿用預設息率，分桶結果可能不準。",
+                action: "確認下一次能連網時重新生成報告；若持續拉不到，可能是該標的在資料源沒有派息記錄。"
             ))
         }
 

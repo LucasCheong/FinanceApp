@@ -150,12 +150,17 @@ final class AdvisorStore: ObservableObject {
             yieldBySymbol[stock.symbol] = stock.dividendYield
         }
 
+        // 先拉一次真實派息記錄（maxAge 0 = 不用快取），接著的報價就會帶上最新息率
+        await StockService.shared.refreshDividendYields(for: holdings.map { $0.symbol }, maxAge: 0)
+
         let infos = holdings.map { holding in
             StockInfo(
                 symbol: holding.symbol,
                 name: holding.name,
                 market: holding.market,
-                dividendYield: yieldBySymbol[holding.symbol] ?? 0
+                dividendYield: StockService.shared.liveDividendYield(for: holding.symbol)
+                    ?? yieldBySymbol[holding.symbol]
+                    ?? 0
             )
         }
         await StockService.shared.fetchQuotes(for: infos)
@@ -474,7 +479,7 @@ struct AdvisorView: View {
             allocationRow("防禦型（現金）", current: snapshot.defensiveRatio, target: target.defensive, color: .blue)
 
             if snapshot.totalAssets > 0 {
-                Text("股息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的股票持倉會歸入收息型。")
+                Text("息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的股票持倉會歸入收息型，息率依近 12 個月實際派息記錄計算。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

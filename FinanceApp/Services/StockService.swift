@@ -8,8 +8,13 @@ final class StockService: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// 實際派息記錄算出的股息率（以 symbol 為鍵），持久化於 UserDefaults
+    @Published private(set) var dividendYieldRecords: [String: DividendYieldRecord] = [:]
+    @Published var isRefreshingDividends = false
+
     private let session: URLSession
     private let baseURL = "https://query1.finance.yahoo.com/v8/finance/chart"
+    private let dividendCacheKey = "stockDividendYieldCache"
 
     private init() {
         let config = URLSessionConfiguration.default
@@ -18,6 +23,7 @@ final class StockService: ObservableObject {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
         ]
         session = URLSession(configuration: config)
+        loadDividendCache()
     }
 
     // MARK: - 批量獲取股票報價
@@ -121,7 +127,7 @@ final class StockService: ObservableObject {
                 previousClose: previousClose,
                 change: change,
                 changePercent: changePercent,
-                dividendYield: stock.dividendYield,
+                dividendYield: liveDividendYield(for: stock.symbol) ?? stock.dividendYield,
                 currency: meta.currency ?? (stock.market == .us ? "USD" : "HKD"),
                 exchange: meta.exchangeName ?? ""
             )
@@ -141,7 +147,7 @@ final class StockService: ObservableObject {
             previousClose: 0,
             change: 0,
             changePercent: 0,
-            dividendYield: stock.dividendYield,
+            dividendYield: liveDividendYield(for: stock.symbol) ?? stock.dividendYield,
             currency: stock.market == .us ? "USD" : "HKD",
             exchange: ""
         )
@@ -181,6 +187,151 @@ final class StockService: ObservableObject {
             $0.symbol.lowercased().contains(lowercaseQuery) ||
             $0.name.lowercased().contains(lowercaseQuery)
         }
+    }
+
+    // MARK: - 股息率（依實際派息記錄計算）
+
+    /// 向 Yahoo chart API 要 events=div，取近 12 個月實際派息總額除以現價，得出 TTM 息率。
+    /// 這條端點與報價同源，不需 crumb 鑑權。
+    func fetchDividendYield(for symbol: String) async -> DividendYieldRecord? {
+        let urlString = "\(baseURL)/\(symbol)?range=1y&interval=1d&events=div"
+        guard let url = URL(string: urlString) else { return nil }
+
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return nil
+            }
+            return parseDividendYield(from: data)
+        } catch {
+            print("獲取 \(symbol) 派息記錄失敗: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func parseDividendYield(from data: Data) -> DividendYieldRecord? {
+        struct DividendResponse: Decodable {
+            struct Chart: Decodable {
+                struct Result: Decodable {
+                    struct Meta: Decodable {
+                        let regularMarketPrice: Double?
+                        let currency: String?
+                    }
+                    struct Events: Decodable {
+                        struct Dividend: Decodable {
+                            let amount: Double
+                            let date: Double
+                        }
+                        let dividends: [String: Dividend]?
+                    }
+                    let meta: Meta
+                    let events: Events?
+                }
+                let result: [Result]?
+            }
+            let chart: Chart
+        }
+
+        do {
+            let decoded = try JSONDecoder().decode(DividendResponse.self, from: data)
+            guard let result = decoded.chart.result?.first,
+                  let price = result.meta.regularMarketPrice, price > 0 else { return nil }
+
+            // 只累加近 365 天的派息，range=1y 邊界可能多包一筆
+            let cutoff = Date().addingTimeInterval(-365 * 24 * 3600).timeIntervalSince1970
+            let events = result.events?.dividends ?? [:]
+            let payouts = events.values.filter { $0.date >= cutoff }
+            let annual = payouts.reduce(0.0) { $0 + $1.amount }
+
+            return DividendYieldRecord(
+                yield: annual / price,
+                annualDividendPerShare: annual,
+                payoutCount: payouts.count,
+                priceAtCalculation: price,
+                currency: result.meta.currency ?? "",
+                updatedAt: Date()
+            )
+        } catch {
+            print("解析派息數據失敗: \(error)")
+            return nil
+        }
+    }
+
+    /// 批量更新股息率。maxAge 內的快取直接重用；maxAge 設 0 則強制重拉。
+    func refreshDividendYields(for symbols: [String], maxAge: TimeInterval = 6 * 3600) async {
+        let now = Date()
+        let existing = dividendYieldRecords
+        let pending = Array(Set(symbols)).filter { symbol in
+            guard let record = existing[symbol] else { return true }
+            return now.timeIntervalSince(record.updatedAt) > maxAge
+        }
+        guard !pending.isEmpty else { return }
+
+        await MainActor.run { isRefreshingDividends = true }
+
+        var fetched: [String: DividendYieldRecord] = [:]
+        let batches = stride(from: 0, to: pending.count, by: 5).map {
+            Array(pending[$0..<min($0 + 5, pending.count)])
+        }
+
+        for batch in batches {
+            let batchResults = await withTaskGroup(of: (String, DividendYieldRecord?).self) { group -> [(String, DividendYieldRecord?)] in
+                for symbol in batch {
+                    group.addTask {
+                        (symbol, await self.fetchDividendYield(for: symbol))
+                    }
+                }
+                var acc: [(String, DividendYieldRecord?)] = []
+                for await item in group {
+                    acc.append(item)
+                }
+                return acc
+            }
+            for (symbol, record) in batchResults {
+                if let record = record {
+                    fetched[symbol] = record
+                }
+            }
+        }
+
+        let newRecords = fetched
+        await MainActor.run {
+            for (symbol, record) in newRecords {
+                self.dividendYieldRecords[symbol] = record
+            }
+            // 已載入的報價同步套上新息率，畫面立即反映（查無派息則保留原值）
+            self.quotes = self.quotes.map { quote in
+                guard let record = newRecords[quote.symbol], record.payoutCount > 0 else { return quote }
+                var updated = quote
+                updated.dividendYield = record.yield
+                return updated
+            }
+            self.saveDividendCache()
+            self.isRefreshingDividends = false
+        }
+    }
+
+    /// 取已更新的真實息率。只有查到實際派息記錄時才回傳；
+    /// 查無派息（可能真的不派息，也可能是該市場資料缺失）一律回 nil，交由呼叫方回退，
+    /// 避免把高息股誤判成 0% 而歸錯桶。
+    func liveDividendYield(for symbol: String) -> Double? {
+        guard let record = dividendYieldRecords[symbol], record.payoutCount > 0 else { return nil }
+        return record.yield
+    }
+
+    func dividendRecord(for symbol: String) -> DividendYieldRecord? {
+        dividendYieldRecords[symbol]
+    }
+
+    private func loadDividendCache() {
+        guard let data = UserDefaults.standard.data(forKey: dividendCacheKey),
+              let decoded = try? JSONDecoder().decode([String: DividendYieldRecord].self, from: data) else { return }
+        dividendYieldRecords = decoded
+    }
+
+    private func saveDividendCache() {
+        guard let data = try? JSONEncoder().encode(dividendYieldRecords) else { return }
+        UserDefaults.standard.set(data, forKey: dividendCacheKey)
     }
 
     // MARK: - 拉取歷史收盤價數據（用於均線計算）

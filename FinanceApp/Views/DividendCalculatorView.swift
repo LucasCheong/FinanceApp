@@ -293,6 +293,8 @@ struct AddDividendPositionView: View {
     @State private var customSymbol = ""
     @State private var customName = ""
     @State private var currency: Currency = .hkd
+    @State private var isFetchingYield = false
+    @State private var yieldSourceNote = ""
 
     var searchResults: [StockInfo] {
         if searchText.isEmpty {
@@ -317,6 +319,29 @@ struct AddDividendPositionView: View {
         return (annual / 365, annual / 12, annual)
     }
 
+    /// 拉取該股近 12 個月的實際派息記錄，覆寫預設息率
+    private func refreshYield(for stock: StockInfo) async {
+        await MainActor.run {
+            isFetchingYield = true
+            yieldSourceNote = ""
+        }
+
+        await StockService.shared.refreshDividendYields(for: [stock.symbol], maxAge: 0)
+        let record = StockService.shared.dividendRecord(for: stock.symbol)
+
+        await MainActor.run {
+            if let record = record, record.payoutCount > 0 {
+                annualYield = String(format: "%.2f", record.yield * 100)
+                yieldSourceNote = "近 12 個月實際派息 \(record.payoutCount) 次，共 \(String(format: "%.3f", record.annualDividendPerShare)) / 股，按現價 \(String(format: "%.2f", record.priceAtCalculation)) 計算"
+            } else if let record = record, record.hasNoDividend {
+                yieldSourceNote = "近 12 個月查不到派息記錄，息率請自行填入"
+            } else {
+                yieldSourceNote = "取不到最新派息數據，目前顯示的是預設息率"
+            }
+            isFetchingYield = false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -334,6 +359,7 @@ struct AddDividendPositionView: View {
                             Button {
                                 selectedStock = stock
                                 annualYield = String(format: "%.2f", stock.dividendYield * 100)
+                                Task { await refreshYield(for: stock) }
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading) {
@@ -341,7 +367,7 @@ struct AddDividendPositionView: View {
                                         Text(stock.name).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Text(stock.dividendYield.yieldPercent())
+                                    Text((StockService.shared.liveDividendYield(for: stock.symbol) ?? stock.dividendYield).yieldPercent())
                                         .font(.caption)
                                         .foregroundStyle(.financePrimary)
                                     if selectedStock?.symbol == stock.symbol {
@@ -351,6 +377,19 @@ struct AddDividendPositionView: View {
                             }
                             .foregroundStyle(.primary)
                         }
+                    }
+
+                    if isFetchingYield {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                            Text("正在拉取最新派息記錄...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if !yieldSourceNote.isEmpty {
+                        Text(yieldSourceNote)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

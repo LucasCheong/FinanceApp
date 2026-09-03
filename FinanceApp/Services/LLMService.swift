@@ -178,8 +178,13 @@ final class LLMService: ObservableObject {
         """)
 
         if !snapshot.incomeClassifiedHoldings.isEmpty {
-            lines.append("[歸入收息型的股票持倉] " + snapshot.incomeClassifiedHoldings.joined(separator: "、")
+            lines.append("[歸入收息型的股票持倉（息率依近 12 個月實際派息記錄計算）] " + snapshot.incomeClassifiedHoldings.joined(separator: "、")
                 + "，估算年股息 " + money(snapshot.estimatedStockDividend))
+        }
+
+        if !snapshot.fallbackYieldHoldings.isEmpty {
+            lines.append("[息率數據不完整] " + snapshot.fallbackYieldHoldings.joined(separator: "、")
+                + " 拉不到實際派息記錄，沿用預設息率")
         }
 
         lines.append("""
