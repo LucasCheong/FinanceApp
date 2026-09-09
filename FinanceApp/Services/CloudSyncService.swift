@@ -3,10 +3,19 @@ import CloudKit
 
 // MARK: - iCloud 同步服務（CloudKit 私有數據庫）
 /// 將完整備份 JSON 上傳到 iCloud 私有數據庫，可在新設備還原。
-/// 需要在 Xcode 中登入 Apple ID 並啟用 iCloud (CloudKit) Capability。
 final class CloudSyncService {
     static let shared = CloudSyncService()
     private init() {}
+
+    /// iCloud 同步的總開關。
+    ///
+    /// 免費 Apple ID（Personal Team）無法簽署 iCloud capability，entitlements 裡包含 iCloud 會讓
+    /// Xcode 建不出 provisioning profile，整個專案 build 不過。因此預設停用。
+    ///
+    /// 取得付費開發者帳號後恢復步驟：
+    /// 1. FinanceApp.entitlements 加回 icloud-services 與 icloud-container-identifiers
+    /// 2. 把這裡改成 true
+    static let isEnabled = false
 
     private let recordType = "FinanceBackup"
     private let recordId = CKRecord.ID(recordName: "full_backup")
@@ -21,6 +30,7 @@ final class CloudSyncService {
 
     /// iCloud 帳戶是否可用
     func checkAccountStatus() async -> Bool {
+        guard Self.isEnabled else { return false }
         do {
             let status = try await container.accountStatus()
             return status == .available
@@ -34,6 +44,8 @@ final class CloudSyncService {
 
     /// 將現有數據上傳到 iCloud（返回上傳字節數）
     func uploadBackup() async throws -> Int {
+        guard Self.isEnabled else { throw CloudSyncError.capabilityUnavailable }
+
         let data = try PersistenceService.shared.createBackupData()
 
         // CloudKit 用 CKAsset 存大數據：先寫到臨時檔案
@@ -62,6 +74,8 @@ final class CloudSyncService {
     /// 從 iCloud 下載備份並還原（覆蓋本地數據），返回備份日期
     @discardableResult
     func restoreBackup() async throws -> Date {
+        guard Self.isEnabled else { throw CloudSyncError.capabilityUnavailable }
+
         let record = try await privateDatabase.record(for: recordId)
 
         guard let asset = record["data"] as? CKAsset, let fileURL = asset.fileURL else {
@@ -78,7 +92,8 @@ final class CloudSyncService {
 
     /// 雲端是否有備份
     func hasCloudBackup() async -> Bool {
-        (try? await privateDatabase.record(for: recordId)) != nil
+        guard Self.isEnabled else { return false }
+        return (try? await privateDatabase.record(for: recordId)) != nil
     }
 
     /// 上次同步時間
@@ -91,11 +106,14 @@ final class CloudSyncService {
 enum CloudSyncError: LocalizedError {
     case noBackupFound
     case restoreFailed
+    case capabilityUnavailable
 
     var errorDescription: String? {
         switch self {
         case .noBackupFound: return "iCloud 上未找到備份數據"
         case .restoreFailed: return "備份還原失敗"
+        case .capabilityUnavailable:
+            return "iCloud 同步需要付費的 Apple Developer 帳號。免費 Apple ID 無法簽署 iCloud capability，此功能已停用。請改用「導出備份 (JSON)」手動保存數據。"
         }
     }
 }

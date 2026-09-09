@@ -251,14 +251,14 @@ struct SettingsView: View {
                             Label("備份到 iCloud", systemImage: "icloud.and.arrow.up")
                         }
                     }
-                    .disabled(isSyncing)
+                    .disabled(isSyncing || !CloudSyncService.isEnabled)
 
                     Button {
                         restoreFromICloud()
                     } label: {
                         Label("從 iCloud 還原", systemImage: "icloud.and.arrow.down")
                     }
-                    .disabled(isSyncing)
+                    .disabled(isSyncing || !CloudSyncService.isEnabled)
 
                     if let syncTime = CloudSyncService.shared.lastSyncTime {
                         HStack {
@@ -272,7 +272,11 @@ struct SettingsView: View {
                 } header: {
                     Text("iCloud 同步")
                 } footer: {
-                    Text("需登入 iCloud 帳戶。還原會覆蓋本機現有數據，請謹慎操作。")
+                    if CloudSyncService.isEnabled {
+                        Text("需登入 iCloud 帳戶。還原會覆蓋本機現有數據，請謹慎操作。")
+                    } else {
+                        Text("此功能需要付費的 Apple Developer 帳號。免費 Apple ID（Personal Team）無法簽署 iCloud capability，否則專案會無法編譯，因此已停用。請改用上方的「導出備份 (JSON)」保存數據。")
+                    }
                 }
 
                 // MARK: - 資訊
@@ -429,7 +433,7 @@ struct SettingsView: View {
                 let bytes = try await CloudSyncService.shared.uploadBackup()
                 syncMessage = "備份成功！已上傳 \(bytes / 1024) KB 數據到 iCloud。"
             } catch {
-                syncMessage = "備份失敗：\(error.localizedDescription)\n\n請確認已登入 iCloud，並在 Xcode 中啟用 iCloud Capability。"
+                syncMessage = "備份失敗：\(error.localizedDescription)"
             }
             isSyncing = false
             showingSyncResult = true
