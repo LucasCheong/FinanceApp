@@ -21,7 +21,7 @@ final class CloudSyncService {
     private let recordId = CKRecord.ID(recordName: "full_backup")
 
     private var container: CKContainer {
-        CKContainer(identifier: "iCloud.com.financeapp.FinanceApp")
+        CKContainer(identifier: "iCloud.com.lucascheong.financeapp")
     }
 
     private var privateDatabase: CKDatabase {

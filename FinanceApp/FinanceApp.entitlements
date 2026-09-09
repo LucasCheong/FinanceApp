@@ -6,10 +6,10 @@
 	     保留會導致 "Cannot create a iOS App Development provisioning profile"。
 	     取得付費開發者帳號後，把下面兩組 key 加回，並將 CloudSyncService.isEnabled 改為 true：
 	     com.apple.developer.icloud-services = [CloudDocuments]
-	     com.apple.developer.icloud-container-identifiers = [iCloud.com.financeapp.FinanceApp] -->
+	     com.apple.developer.icloud-container-identifiers = [iCloud.com.lucascheong.financeapp] -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.financeapp.FinanceApp</string>
+		<string>group.com.lucascheong.financeapp</string>
 	</array>
 </dict>
 </plist>

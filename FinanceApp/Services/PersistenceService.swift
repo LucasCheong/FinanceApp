@@ -621,7 +621,7 @@ final class PersistenceService: ObservableObject {
 
     /// 將最新統計寫入 App Group UserDefaults，供桌面小組件讀取
     func updateWidgetSnapshot() {
-        guard let defaults = UserDefaults(suiteName: "group.com.financeapp.FinanceApp") else { return }
+        guard let defaults = UserDefaults(suiteName: "group.com.lucascheong.financeapp") else { return }
 
         let todayExpense = transactions
             .filter { $0.type == .expense && Calendar.current.isDateInToday($0.date) }
