@@ -313,10 +313,18 @@ struct ExpenseAnalysisView: View {
                             .cornerRadius(6)
                     }
                     .padding(.vertical, 4)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            persistence.deleteCustomCategory(cat)
+                        } label: {
+                            Label("刪除類別", systemImage: "trash")
+                        }
+                    }
                 }
-                .onDelete { offsets in
-                    persistence.deleteCustomCategory(at: offsets)
-                }
+
+                Text("長按類別可刪除")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .cardStyle()

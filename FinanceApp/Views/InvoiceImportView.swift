@@ -145,6 +145,7 @@ struct InvoiceImportView: View {
     }
 
     // MARK: - 已導入發票列表
+    /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
     private var importedInvoicesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("已導入發票 (\(persistence.invoices.count))")
@@ -152,10 +153,18 @@ struct InvoiceImportView: View {
 
             ForEach(persistence.invoices) { invoice in
                 InvoiceRow(invoice: invoice)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            persistence.deleteInvoice(invoice)
+                        } label: {
+                            Label("刪除發票", systemImage: "trash")
+                        }
+                    }
             }
-            .onDelete { offsets in
-                persistence.deleteInvoice(at: offsets)
-            }
+
+            Text("長按發票可刪除")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .cardStyle()
     }

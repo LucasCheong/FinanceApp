@@ -231,14 +231,23 @@ struct PortfolioView: View {
     }
 
     // MARK: - 持倉列表
+    /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
     private var holdingsList: some View {
         VStack(spacing: 8) {
             ForEach(persistence.holdings) { holding in
                 HoldingRow(holding: holding, quote: currentQuotes[holding.symbol])
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            persistence.deleteHolding(holding)
+                        } label: {
+                            Label("刪除持倉", systemImage: "trash")
+                        }
+                    }
             }
-            .onDelete { offsets in
-                persistence.deleteHolding(at: offsets)
-            }
+
+            Text("長按持倉可刪除")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 

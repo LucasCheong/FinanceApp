@@ -282,14 +282,23 @@ struct DividendCalculatorView: View {
     }
 
     // MARK: - 持倉列表
+    /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
     private var positionsList: some View {
         VStack(spacing: 8) {
             ForEach(persistence.dividendPositions) { position in
                 DividendPositionRow(position: position)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            persistence.deleteDividendPosition(position)
+                        } label: {
+                            Label("刪除持倉", systemImage: "trash")
+                        }
+                    }
             }
-            .onDelete { offsets in
-                persistence.deleteDividendPosition(at: offsets)
-            }
+
+            Text("長按持倉可刪除")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 

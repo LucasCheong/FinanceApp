@@ -286,14 +286,23 @@ struct AccountingView: View {
     }
 
     // MARK: - 交易列表
+    /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
     private var transactionsList: some View {
         LazyVStack(spacing: 8) {
             ForEach(filteredTransactions) { transaction in
                 TransactionRow(transaction: transaction)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            persistence.deleteTransaction(transaction)
+                        } label: {
+                            Label("刪除記帳", systemImage: "trash")
+                        }
+                    }
             }
-            .onDelete { offsets in
-                persistence.deleteTransaction(at: offsets)
-            }
+
+            Text("長按記帳可刪除")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 

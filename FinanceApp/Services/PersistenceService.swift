@@ -221,6 +221,13 @@ final class PersistenceService: ObservableObject {
         saveCustomCategories()
     }
 
+    /// 依 id 刪除。ForEach 在 List 之外時 .onDelete 不會生效，故卡片式列表改用 contextMenu 呼叫這組方法
+    func deleteCustomCategory(_ category: CustomCategory) {
+        customCategories.removeAll { $0.id == category.id }
+        saveCustomCategories()
+        Haptics.warning()
+    }
+
     /// 獲取指定類型的所有類別名稱（預設 + 自定義）
     func allCategoryNames(for type: Transaction.TransactionType) -> [String] {
         let defaultCategories: [String]
@@ -338,6 +345,14 @@ final class PersistenceService: ObservableObject {
         saveTransactions()
     }
 
+    /// 依 id 刪除一筆交易（卡片式列表用）
+    func deleteTransaction(_ transaction: Transaction) {
+        transactions.removeAll { $0.id == transaction.id }
+        saveTransactions()
+        Haptics.warning()
+        updateWidgetSnapshot()
+    }
+
     func updateTransaction(_ transaction: Transaction) {
         if let index = transactions.firstIndex(where: { $0.id == transaction.id }) {
             transactions[index] = transaction
@@ -356,6 +371,13 @@ final class PersistenceService: ObservableObject {
         saveHoldings()
     }
 
+    /// 依 id 刪除持倉（卡片式列表用）
+    func deleteHolding(_ holding: StockHolding) {
+        holdings.removeAll { $0.id == holding.id }
+        saveHoldings()
+        Haptics.warning()
+    }
+
     // MARK: - 發票
     func addInvoice(_ invoice: Invoice) {
         invoices.insert(invoice, at: 0)
@@ -365,6 +387,13 @@ final class PersistenceService: ObservableObject {
     func deleteInvoice(at indexSet: IndexSet) {
         invoices.remove(atOffsets: indexSet)
         saveInvoices()
+    }
+
+    /// 依 id 刪除發票（卡片式列表用）
+    func deleteInvoice(_ invoice: Invoice) {
+        invoices.removeAll { $0.id == invoice.id }
+        saveInvoices()
+        Haptics.warning()
     }
 
     func markInvoiceImported(_ invoice: Invoice) {
@@ -383,6 +412,13 @@ final class PersistenceService: ObservableObject {
     func deleteDividendPosition(at indexSet: IndexSet) {
         dividendPositions.remove(atOffsets: indexSet)
         saveDividends()
+    }
+
+    /// 依 id 刪除收息持倉（卡片式列表用）
+    func deleteDividendPosition(_ position: DividendPosition) {
+        dividendPositions.removeAll { $0.id == position.id }
+        saveDividends()
+        Haptics.warning()
     }
 
     // MARK: - 財富快照
