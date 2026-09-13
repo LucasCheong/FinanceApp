@@ -310,7 +310,7 @@ struct AccountRow: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(balance.moneyString(currency: account.currency))
                         .font(.headline)
-                        .foregroundStyle(balance >= 0 ? .primary : .loss)
+                        .foregroundStyle(balance >= 0 ? Color.primary : Color.loss)
                     Text(account.currency.code)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -708,7 +708,7 @@ struct LabeledRow: View {
             Spacer()
             Text(value)
                 .bold(highlight)
-                .foregroundStyle(highlight ? .financePrimary : .primary)
+                .foregroundStyle(highlight ? Color.financePrimary : Color.primary)
         }
         .font(.subheadline)
     }
