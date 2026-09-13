@@ -102,7 +102,7 @@ struct AccountingView: View {
     // MARK: - 財務概覽卡片
     private var summaryCard: some View {
         VStack(spacing: 12) {
-            Text("總資產結餘")
+            Text("現金結餘")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -131,6 +131,30 @@ struct AccountingView: View {
                     Text(persistence.totalExpense.moneyString(currency: persistence.baseCurrency))
                         .font(.headline)
                         .foregroundStyle(.expenseColor)
+                }
+            }
+
+            // 建立帳戶後額外顯示定期與帳戶總額，避免現金結餘被誤讀成全部資產
+            if persistence.hasAccounts {
+                Divider()
+                HStack {
+                    Label("帳戶總資產", systemImage: "building.columns")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(persistence.totalAccountAssets.moneyString(currency: persistence.baseCurrency))
+                        .font(.caption.bold())
+                }
+                if persistence.totalFixedDepositValue > 0 {
+                    HStack {
+                        Label("其中定期", systemImage: AccountType.fixedDeposit.systemIcon)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(persistence.totalFixedDepositValue.moneyString(currency: persistence.baseCurrency))
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
         }
@@ -272,6 +296,14 @@ struct TransactionRow: View {
         PersistenceService.shared.categoryIcon(for: transaction.category, type: transaction.type)
     }
 
+    /// 此筆記帳計入哪個帳戶，未指定時不顯示
+    private var accountName: String? {
+        guard let accountId = transaction.accountId,
+              let account = PersistenceService.shared.accounts.first(where: { $0.id == accountId })
+        else { return nil }
+        return account.name
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // 類別圖標
@@ -291,6 +323,10 @@ struct TransactionRow: View {
                     Text(transaction.category)
                     Text("·")
                     Text(transaction.date.shortDateString)
+                    if let accountName {
+                        Text("·")
+                        Label(accountName, systemImage: "building.columns")
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -326,6 +362,7 @@ struct AddTransactionView: View {
     @State private var date = Date()
     @State private var note = ""
     @State private var currency: Currency = .hkd
+    @State private var accountId: UUID?
 
     var currentCategories: [String] {
         persistence.allCategoryNames(for: type)
@@ -360,6 +397,26 @@ struct AddTransactionView: View {
                     }
                 }
 
+                if !persistence.transactableAccounts.isEmpty {
+                    Section {
+                        Picker("帳戶", selection: $accountId) {
+                            Text("未指定").tag(UUID?.none)
+                            ForEach(persistence.transactableAccounts) { account in
+                                Text(account.displayName).tag(Optional(account.id))
+                            }
+                        }
+                        .onChange(of: accountId) { newValue in
+                            // 選定帳戶後自動對齊幣種，避免每筆都要手改
+                            if let newValue,
+                               let account = persistence.accounts.first(where: { $0.id == newValue }) {
+                                currency = account.currency
+                            }
+                        }
+                    } footer: {
+                        Text("選定帳戶後，此筆金額會自動加減該帳戶餘額。")
+                    }
+                }
+
                 Section("類別") {
                     Picker("類別", selection: $category) {
                         ForEach(currentCategories, id: \.self) { cat in
@@ -389,6 +446,12 @@ struct AddTransactionView: View {
                         .bold()
                 }
             }
+            .onAppear {
+                // 只有一個現金帳戶時預設選上，多帳戶由使用者自行指定
+                if accountId == nil, persistence.transactableAccounts.count == 1 {
+                    accountId = persistence.transactableAccounts.first?.id
+                }
+            }
         }
     }
 
@@ -402,7 +465,8 @@ struct AddTransactionView: View {
             category: category,
             note: note,
             source: .manual,
-            currency: currency
+            currency: currency,
+            accountId: accountId
         )
 
         persistence.addTransaction(transaction)

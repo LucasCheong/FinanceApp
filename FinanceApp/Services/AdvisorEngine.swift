@@ -57,7 +57,10 @@ enum AdvisorEngine {
         }
 
         // --- 資產 ---
+        // cashBalance 已在 PersistenceService 改為「帳戶現金總額 + 未歸屬記帳淨額」
         snapshot.cashBalance = max(0, persistence.cashBalance)
+        snapshot.fixedDepositValue = persistence.totalFixedDepositValue
+        snapshot.fixedDepositInterest = persistence.totalFixedDepositAnnualInterest
 
         // 息率回退表：報價帶不回真實派息數據時才用
         var yieldBySymbol: [String: Double] = [:]
@@ -146,16 +149,18 @@ enum AdvisorEngine {
         snapshot.unrealizedPnLPercent = stockCost > 0 ? (stockValue - stockCost) / stockCost : 0
         snapshot.losingHoldings = losing
 
-        let total = snapshot.cashBalance + stockValue + dividendValue
+        let total = snapshot.cashBalance + stockValue + dividendValue + snapshot.fixedDepositValue
         snapshot.totalAssets = total
 
         if total > 0 {
             snapshot.growthRatio = growthStockValue / total
             snapshot.incomeRatio = (dividendValue + incomeStockValue) / total
-            snapshot.defensiveRatio = snapshot.cashBalance / total
+            // 定期存款本金不隨市波動，與現金同屬防禦型資產
+            snapshot.defensiveRatio = (snapshot.cashBalance + snapshot.fixedDepositValue) / total
         }
 
         // --- 風險指標 ---
+        // 定期存款提前取回會損失利息，流動性不等於現金，故備用金月數不計入定期
         snapshot.emergencyMonths = snapshot.monthlyExpense > 0
             ? snapshot.cashBalance / snapshot.monthlyExpense
             : (snapshot.cashBalance > 0 ? 99 : 0)
@@ -174,7 +179,7 @@ enum AdvisorEngine {
         }
 
         let annualExpense = snapshot.monthlyExpense * 12
-        snapshot.dividendCoverage = annualExpense > 0 ? snapshot.annualDividendIncome / annualExpense : 0
+        snapshot.dividendCoverage = annualExpense > 0 ? snapshot.annualPassiveIncome / annualExpense : 0
 
         return snapshot
     }
@@ -364,21 +369,24 @@ enum AdvisorEngine {
             }
         }
 
-        // 7. 股息覆蓋率
-        if snapshot.annualDividendIncome > 0 && snapshot.monthlyExpense > 0 {
+        // 7. 被動收入覆蓋率（股息 + 定期利息）
+        if snapshot.annualPassiveIncome > 0 && snapshot.monthlyExpense > 0 {
             let coverage = snapshot.dividendCoverage
+            let incomeBreakdown = snapshot.fixedDepositInterest > 0
+                ? "年被動收入 \(money(snapshot.annualPassiveIncome, snapshot))（股息 \(money(snapshot.annualDividendIncome, snapshot))、定期利息 \(money(snapshot.fixedDepositInterest, snapshot))）"
+                : "年股息 \(money(snapshot.annualDividendIncome, snapshot))"
             if coverage >= 1.0 {
                 findings.append(AdvisorFinding(
                     severity: .good,
                     title: "被動收入已覆蓋開支",
-                    detail: "年股息 \(money(snapshot.annualDividendIncome, snapshot)) 已覆蓋年支出的 \(percentText(coverage))，具備財務獨立的基礎。",
-                    action: "關注派息可持續性，避免為追高息而承擔過高本金風險。"
+                    detail: "\(incomeBreakdown) 已覆蓋年支出的 \(percentText(coverage))，具備財務獨立的基礎。",
+                    action: "關注派息可持續性與定期到期後的續存利率，避免為追高息而承擔過高本金風險。"
                 ))
             } else {
                 findings.append(AdvisorFinding(
                     severity: .info,
                     title: "被動收入覆蓋率 \(percentText(coverage))",
-                    detail: "年股息 \(money(snapshot.annualDividendIncome, snapshot))，年支出 \(money(snapshot.monthlyExpense * 12, snapshot))。",
+                    detail: "\(incomeBreakdown)，年支出 \(money(snapshot.monthlyExpense * 12, snapshot))。",
                     action: "若以財務自由為目標，按目前平均息率計算，還需增加約 \(money(neededCapital(snapshot), snapshot)) 的收息資產。"
                 ))
             }
@@ -404,12 +412,15 @@ enum AdvisorEngine {
             ))
         }
 
-        // 10. 現金拖累
+        // 10. 現金拖累。定存已計入防禦型，故此處說明要區分現金與定期
         if snapshot.totalAssets > 0 && snapshot.defensiveRatio > 0.70 && snapshot.emergencyMonths > 12 {
+            let composition = snapshot.fixedDepositValue > 0
+                ? "現金與定期合計佔總資產 \(percentText(snapshot.defensiveRatio))（其中定期 \(money(snapshot.fixedDepositValue, snapshot))）"
+                : "現金佔總資產 \(percentText(snapshot.defensiveRatio))"
             findings.append(AdvisorFinding(
                 severity: .warning,
-                title: "現金比重過高",
-                detail: "現金佔總資產 \(percentText(snapshot.defensiveRatio))，且已遠超備用金需求。長期持有現金會被通脹侵蝕購買力。",
+                title: "防禦型資產比重過高",
+                detail: "\(composition)，且已遠超備用金需求。長期持有低息資產會被通脹侵蝕購買力。",
                 action: "按\(level.title)的目標配置，分批把多餘現金投入生息資產。"
             ))
         }
@@ -437,14 +448,14 @@ enum AdvisorEngine {
         return findings.sorted { $0.severity < $1.severity }
     }
 
-    /// 達到股息覆蓋全部開支所需的額外收息本金
+    /// 達到被動收入覆蓋全部開支所需的額外收息本金
     private static func neededCapital(_ snapshot: FinancialSnapshot) -> Double {
         let annualExpense = snapshot.monthlyExpense * 12
-        let gap = max(0, annualExpense - snapshot.annualDividendIncome)
-        // 以目前收息型資產的實際平均息率估算，無數據時用 5%
-        let incomeAssets = snapshot.totalIncomeAssets
+        let gap = max(0, annualExpense - snapshot.annualPassiveIncome)
+        // 以目前收息型資產（含定期）的實際平均息率估算，無數據時用 5%
+        let incomeAssets = snapshot.totalIncomeAssets + snapshot.fixedDepositValue
         let yieldRate = incomeAssets > 0
-            ? max(0.01, snapshot.annualDividendIncome / incomeAssets)
+            ? max(0.01, snapshot.annualPassiveIncome / incomeAssets)
             : 0.05
         return gap / yieldRate
     }
@@ -471,7 +482,7 @@ enum AdvisorEngine {
                 color: .green
             ),
             RebalanceItem(
-                bucket: "防禦型（現金）",
+                bucket: "防禦型（現金、定期）",
                 currentRatio: snapshot.defensiveRatio,
                 targetRatio: target.defensive,
                 deltaAmount: (target.defensive - snapshot.defensiveRatio) * snapshot.totalAssets,

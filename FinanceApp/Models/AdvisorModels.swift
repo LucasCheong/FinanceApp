@@ -264,6 +264,10 @@ struct FinancialSnapshot {
     var stockCost: Double = 0
     var dividendValue: Double = 0
     var annualDividendIncome: Double = 0
+    /// 定期存款本金加已累積利息
+    var fixedDepositValue: Double = 0
+    /// 定期存款的年化利息
+    var fixedDepositInterest: Double = 0
     var totalAssets: Double = 0
 
     // 股票持倉依息率拆分（息率 ≥ 4% 歸為收息型）
@@ -279,6 +283,9 @@ struct FinancialSnapshot {
     /// 收息型資產總額（收息倉 + 高息股票持倉）
     var totalIncomeAssets: Double { dividendValue + incomeStockValue }
 
+    /// 年度被動收入（股息 + 定期利息）
+    var annualPassiveIncome: Double { annualDividendIncome + fixedDepositInterest }
+
     // 比例
     var growthRatio: Double = 0
     var incomeRatio: Double = 0
@@ -291,7 +298,7 @@ struct FinancialSnapshot {
     var topHoldingRatio: Double = 0       // 佔投資資產比重
     var marketExposure: [String: Double] = [:]     // 美股／港股佔比
     var currencyExposure: [String: Double] = [:]   // 幣種佔比
-    var dividendCoverage: Double = 0      // 年股息 / 年支出
+    var dividendCoverage: Double = 0      // 年被動收入（股息 + 定期利息）/ 年支出
     var unrealizedPnL: Double = 0
     var unrealizedPnLPercent: Double = 0
     var losingHoldings: [String] = []     // 虧損超過 20% 的持倉

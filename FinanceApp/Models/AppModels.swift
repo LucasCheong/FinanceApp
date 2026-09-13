@@ -73,6 +73,8 @@ struct Transaction: Identifiable, Codable, Hashable {
     var note: String
     var source: TransactionSource
     var currency: Currency
+    /// 所屬帳戶。舊資料為 nil，不計入任何帳戶餘額
+    var accountId: UUID? = nil
 
     enum TransactionType: String, Codable, CaseIterable {
         case income = "收入"
@@ -89,6 +91,136 @@ struct Transaction: Identifiable, Codable, Hashable {
     enum TransactionSource: String, Codable {
         case manual = "手動輸入"
         case invoice = "發票導入"
+    }
+}
+
+// MARK: - 帳戶類型
+enum AccountType: String, Codable, CaseIterable {
+    case cash = "現金"
+    case investment = "投資"
+    case fixedDeposit = "定期"
+
+    var systemIcon: String {
+        switch self {
+        case .cash: return "banknote"
+        case .investment: return "chart.line.uptrend.xyaxis"
+        case .fixedDeposit: return "lock.circle"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .cash: return "活期或儲蓄戶口，餘額由起始金額加上記帳收支推算"
+        case .investment: return "餘額自動連動組合分頁的持倉市值，不需手填"
+        case .fixedDeposit: return "定期存款，按年利率計息，利息會計入收息頁"
+        }
+    }
+}
+
+// MARK: - 計息方式
+enum InterestCompounding: String, Codable, CaseIterable {
+    case simple = "單利"
+    case monthly = "按月複利"
+    case quarterly = "按季複利"
+    case annually = "按年複利"
+
+    /// 每年計息次數，單利回 0
+    var periodsPerYear: Int {
+        switch self {
+        case .simple: return 0
+        case .monthly: return 12
+        case .quarterly: return 4
+        case .annually: return 1
+        }
+    }
+}
+
+// MARK: - 帳戶模型
+/// 現金戶口、投資帳戶與定期存款共用同一個型別，定期專用欄位僅在
+/// type == .fixedDeposit 時有意義。所有利息計算都收在這裡，確保帳戶頁、
+/// 收息頁、財務顧問三處用的是同一套算法。
+struct Account: Identifiable, Codable {
+    var id: UUID = UUID()
+    var name: String
+    /// 開戶機構，例如「中國銀行」
+    var institution: String = ""
+    var type: AccountType = .cash
+    var currency: Currency = .hkd
+    var note: String = ""
+    var createdAt: Date = Date()
+    var isArchived: Bool = false
+
+    /// 現金帳戶的起始餘額，記帳收支在此之上累加
+    var initialBalance: Double = 0
+
+    // MARK: 定期存款專用欄位
+    var principal: Double = 0
+    /// 年利率（小數，0.035 = 3.5%）
+    var annualRate: Double = 0
+    var startDate: Date = Date()
+    /// 存期（月）
+    var termMonths: Int = 12
+    var compounding: InterestCompounding = .simple
+
+    var displayName: String {
+        institution.isEmpty ? name : "\(institution) · \(name)"
+    }
+
+    // MARK: - 定期存款計算
+
+    var maturityDate: Date {
+        Calendar.current.date(byAdding: .month, value: termMonths, to: startDate) ?? startDate
+    }
+
+    var termYears: Double {
+        Double(termMonths) / 12.0
+    }
+
+    /// 到期可取回的總利息
+    var maturityInterest: Double {
+        interest(after: termYears)
+    }
+
+    /// 到期本金加利息
+    var maturityValue: Double {
+        principal + maturityInterest
+    }
+
+    /// 起息日至今已累積的利息，到期後不再增長
+    var accruedInterest: Double {
+        let elapsed = Date().timeIntervalSince(startDate)
+        guard elapsed > 0 else { return 0 }
+        let elapsedYears = min(elapsed / (365 * 24 * 3600), termYears)
+        return interest(after: elapsedYears)
+    }
+
+    /// 年化利息。存期不足一年時仍以年化口徑呈現，方便與股息並列比較
+    var annualInterest: Double {
+        interest(after: 1)
+    }
+
+    var monthlyInterest: Double { annualInterest / 12.0 }
+    var dailyInterest: Double { annualInterest / 365.0 }
+
+    var isMatured: Bool {
+        Date() >= maturityDate
+    }
+
+    /// 存期進度（0〜1）
+    var termProgress: Double {
+        let total = maturityDate.timeIntervalSince(startDate)
+        guard total > 0 else { return 1 }
+        return min(1, max(0, Date().timeIntervalSince(startDate) / total))
+    }
+
+    private func interest(after years: Double) -> Double {
+        guard principal > 0, annualRate > 0, years > 0 else { return 0 }
+        let periodsPerYear = compounding.periodsPerYear
+        guard periodsPerYear > 0 else {
+            return principal * annualRate * years
+        }
+        let growth = pow(1 + annualRate / Double(periodsPerYear), Double(periodsPerYear) * years)
+        return principal * (growth - 1)
     }
 }
 

@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var showingAlertCenter = false
     @State private var showingAssetAllocation = false
     @State private var showingExchangeRate = false
+    @State private var showingAccounts = false
 
     @AppStorage("colorScheme") private var colorScheme = "system"
 
@@ -56,6 +57,9 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            Button { showingAccounts = true } label: {
+                                Label("我的帳戶", systemImage: "building.columns")
+                            }
                             Button { showingBudget = true } label: {
                                 Label("預算管理", systemImage: "creditcard.fill")
                             }
@@ -69,6 +73,7 @@ struct ContentView: View {
                 }
                 .sheet(isPresented: $showingBudget) { BudgetView() }
                 .sheet(isPresented: $showingExchangeRate) { ExchangeRateView() }
+                .sheet(isPresented: $showingAccounts) { AccountsView() }
 
         case 1:
             // 發票導入

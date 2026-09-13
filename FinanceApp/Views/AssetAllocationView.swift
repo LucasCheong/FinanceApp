@@ -80,8 +80,9 @@ struct AssetAllocationView: View {
             }
 
             let cashValue = persistence.cashBalance
+            let depositValue = persistence.totalFixedDepositValue
 
-            Text((stockValue + cashValue).moneyString(currency: persistence.baseCurrency))
+            Text((stockValue + cashValue + depositValue).moneyString(currency: persistence.baseCurrency))
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(.financePrimary)
 
@@ -99,6 +100,15 @@ struct AssetAllocationView: View {
                         .foregroundStyle(.secondary)
                     Text(stockValue.moneyString(currency: persistence.baseCurrency))
                         .font(.subheadline.bold())
+                }
+                if depositValue > 0 {
+                    VStack {
+                        Text("定期")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(depositValue.moneyString(currency: persistence.baseCurrency))
+                            .font(.subheadline.bold())
+                    }
                 }
             }
         }

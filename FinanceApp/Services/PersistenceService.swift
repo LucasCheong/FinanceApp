@@ -18,6 +18,7 @@ final class PersistenceService: ObservableObject {
     private let recurringFile = "recurring_transactions.json"
     private let priceAlertsFile = "price_alerts.json"
     private let dcaFile = "dca_positions.json"
+    private let accountsFile = "accounts.json"
 
     // 發布的數據
     @Published var transactions: [Transaction] = []
@@ -32,6 +33,7 @@ final class PersistenceService: ObservableObject {
     @Published var recurringTransactions: [RecurringTransaction] = []
     @Published var priceAlerts: [PriceAlert] = []
     @Published var dcaPositions: [DCAPosition] = []
+    @Published var accounts: [Account] = []
 
     private init() {
         documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -393,6 +395,157 @@ final class PersistenceService: ObservableObject {
         saveWealthSnapshots()
     }
 
+    // MARK: - 帳戶管理
+
+    func addAccount(_ account: Account) {
+        accounts.append(account)
+        saveAccounts()
+        Haptics.success()
+    }
+
+    func updateAccount(_ account: Account) {
+        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
+        accounts[index] = account
+        saveAccounts()
+    }
+
+    func deleteAccount(_ account: Account) {
+        accounts.removeAll { $0.id == account.id }
+        // 已登記到此帳戶的交易改回未指定，不留下指向不存在帳戶的引用
+        var touched = false
+        for index in transactions.indices where transactions[index].accountId == account.id {
+            transactions[index].accountId = nil
+            touched = true
+        }
+        saveAccounts()
+        if touched { saveTransactions() }
+    }
+
+    func deleteAccounts(at offsets: IndexSet) {
+        for account in offsets.map({ accounts[$0] }) {
+            deleteAccount(account)
+        }
+    }
+
+    /// 未被歸檔的帳戶
+    var activeAccounts: [Account] {
+        accounts.filter { !$0.isArchived }
+    }
+
+    /// 記帳時可選的帳戶：只有現金戶口參與日常收支
+    var transactableAccounts: [Account] {
+        activeAccounts.filter { $0.type == .cash }
+    }
+
+    /// 是否已建立任何帳戶。未建立時各處沿用原本的記帳結餘邏輯
+    var hasAccounts: Bool { !activeAccounts.isEmpty }
+
+    /// 某帳戶的記帳淨額（收入減支出，換算為指定幣種）
+    func netTransactionAmount(for accountId: UUID, in currency: Currency) -> Double {
+        transactions.reduce(0.0) { total, tx in
+            guard tx.accountId == accountId else { return total }
+            let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: currency)
+            return tx.type == .income ? total + amount : total - amount
+        }
+    }
+
+    /// 尚未歸屬到任何帳戶的記帳淨額（基準幣種）
+    var unassignedCashFlow: Double {
+        transactions.reduce(0.0) { total, tx in
+            guard tx.accountId == nil else { return total }
+            let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            return tx.type == .income ? total + amount : total - amount
+        }
+    }
+
+    /// 未歸屬帳戶的交易筆數
+    var unassignedTransactionCount: Int {
+        transactions.filter { $0.accountId == nil }.count
+    }
+
+    /// 把所有未歸屬的交易一次歸入指定帳戶
+    func assignUnassignedTransactions(to accountId: UUID) {
+        var touched = false
+        for index in transactions.indices where transactions[index].accountId == nil {
+            transactions[index].accountId = accountId
+            touched = true
+        }
+        if touched {
+            saveTransactions()
+            Haptics.success()
+        }
+    }
+
+    /// 組合分頁持倉的市值（換算為指定幣種），取不到報價時回退買入價
+    func portfolioMarketValue(in currency: Currency) -> Double {
+        let quotes = StockService.shared.quotes
+        return holdings.reduce(0.0) { total, holding in
+            let price = quotes.first { $0.symbol == holding.symbol }?.currentPrice ?? holding.purchasePrice
+            let value = Double(holding.shares) * price
+            return total + ExchangeRateProvider.convert(value, from: Currency.from(market: holding.market), to: currency)
+        }
+    }
+
+    /// 帳戶目前餘額（以帳戶自身幣種計）
+    func currentBalance(for account: Account) -> Double {
+        switch account.type {
+        case .cash:
+            return account.initialBalance + netTransactionAmount(for: account.id, in: account.currency)
+        case .investment:
+            return portfolioMarketValue(in: account.currency)
+        case .fixedDeposit:
+            return account.principal + account.accruedInterest
+        }
+    }
+
+    /// 帳戶餘額換算為基準幣種
+    func balanceInBaseCurrency(for account: Account) -> Double {
+        ExchangeRateProvider.convert(currentBalance(for: account), from: account.currency, to: baseCurrency)
+    }
+
+    /// 現金類帳戶總額（基準幣種）
+    var totalCashAccountBalance: Double {
+        activeAccounts.filter { $0.type == .cash }
+            .reduce(0) { $0 + balanceInBaseCurrency(for: $1) }
+    }
+
+    /// 定期存款本金加已累積利息（基準幣種）
+    var totalFixedDepositValue: Double {
+        activeAccounts.filter { $0.type == .fixedDeposit }
+            .reduce(0) { $0 + balanceInBaseCurrency(for: $1) }
+    }
+
+    /// 定期存款本金合計（基準幣種），不含已累積利息。用作收息頁的息率分母
+    var totalFixedDepositPrincipal: Double {
+        activeAccounts.filter { $0.type == .fixedDeposit }
+            .reduce(0) { total, account in
+                total + ExchangeRateProvider.convert(account.principal, from: account.currency, to: baseCurrency)
+            }
+    }
+
+    /// 定期存款的年化利息合計（基準幣種）。已到期的不再產生利息，不計入
+    var totalFixedDepositAnnualInterest: Double {
+        activeAccounts.filter { $0.type == .fixedDeposit && !$0.isMatured }
+            .reduce(0) { total, account in
+                total + ExchangeRateProvider.convert(account.annualInterest, from: account.currency, to: baseCurrency)
+            }
+    }
+
+    /// 仍在計息中的定期帳戶，依到期日排序
+    var activeFixedDeposits: [Account] {
+        activeAccounts.filter { $0.type == .fixedDeposit }
+            .sorted { $0.maturityDate < $1.maturityDate }
+    }
+
+    /// 帳戶總資產（基準幣種）。多個投資帳戶只計一次組合市值，避免資產翻倍
+    var totalAccountAssets: Double {
+        var total = totalCashAccountBalance + totalFixedDepositValue
+        if activeAccounts.contains(where: { $0.type == .investment }) {
+            total += portfolioMarketValue(in: baseCurrency)
+        }
+        return total
+    }
+
     // MARK: - 計算屬性（以基準幣種結算）
 
     /// 總收入（轉換為基準幣種）
@@ -410,8 +563,12 @@ final class PersistenceService: ObservableObject {
     }
 
     /// 現金結餘（基準幣種）
+    ///
+    /// 已建立帳戶時以帳戶餘額為準，再加上尚未歸屬到任何帳戶的記帳淨額，
+    /// 避免舊交易的金額在建帳戶後憑空消失。完全沒建帳戶時沿用原本的記帳淨額。
     var cashBalance: Double {
-        totalIncome - totalExpense
+        guard hasAccounts else { return totalIncome - totalExpense }
+        return totalCashAccountBalance + unassignedCashFlow
     }
 
     /// 本月收入（基準幣種）
@@ -513,6 +670,10 @@ final class PersistenceService: ObservableObject {
         save(dcaPositions, to: dcaFile)
     }
 
+    private func saveAccounts() {
+        save(accounts, to: accountsFile)
+    }
+
     private func save<T: Encodable>(_ data: T, to filename: String) {
         let url = documentsDirectory.appendingPathComponent(filename)
         do {
@@ -542,6 +703,7 @@ final class PersistenceService: ObservableObject {
         recurringTransactions = load(recurringFile) ?? []
         priceAlerts = load(priceAlertsFile) ?? []
         dcaPositions = load(dcaFile) ?? []
+        accounts = load(accountsFile) ?? []
     }
 
     /// 設定基準幣種（全 App 的跨幣種結算與介面顯示幣種）
@@ -553,23 +715,47 @@ final class PersistenceService: ObservableObject {
 
     // MARK: - 數據導入 / 備份
 
+    /// 備份檔案結構。必須走 Codable：JSONSerialization 只接受 NSObject 類型，
+    /// 直接餅 Swift struct 陣列給它會拋 exception
+    private struct BackupPayload: Codable {
+        var exportDate: String
+        var baseCurrency: String
+        var data: Payload
+
+        struct Payload: Codable {
+            var transactions: [Transaction]
+            var holdings: [StockHolding]
+            var budgets: [Budget]
+            var customCategories: [CustomCategory]
+            var dividendPositions: [DividendPosition]
+            var recurringTransactions: [RecurringTransaction]
+            var priceAlerts: [PriceAlert]
+            var dcaPositions: [DCAPosition]
+            var accounts: [Account]
+        }
+    }
+
     /// 生成完整備份數據（與匯出 JSON 格式一致，供檔案匯出與 iCloud 同步共用）
     func createBackupData() throws -> Data {
-        let payload: [String: Any] = [
-            "exportDate": ISO8601DateFormatter().string(from: Date()),
-            "baseCurrency": baseCurrency.code,
-            "data": [
-                "transactions": transactions,
-                "holdings": holdings,
-                "budgets": budgets,
-                "customCategories": customCategories,
-                "dividendPositions": dividendPositions,
-                "recurringTransactions": recurringTransactions,
-                "priceAlerts": priceAlerts,
-                "dcaPositions": dcaPositions
-            ]
-        ]
-        return try JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted)
+        let payload = BackupPayload(
+            exportDate: ISO8601DateFormatter().string(from: Date()),
+            baseCurrency: baseCurrency.code,
+            data: BackupPayload.Payload(
+                transactions: transactions,
+                holdings: holdings,
+                budgets: budgets,
+                customCategories: customCategories,
+                dividendPositions: dividendPositions,
+                recurringTransactions: recurringTransactions,
+                priceAlerts: priceAlerts,
+                dcaPositions: dcaPositions,
+                accounts: accounts
+            )
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = .prettyPrinted
+        return try encoder.encode(payload)
     }
 
     /// 從備份檔案導入數據（覆蓋現有數據）
@@ -604,6 +790,7 @@ final class PersistenceService: ObservableObject {
         recurringTransactions = decode("recurringTransactions")
         priceAlerts = decode("priceAlerts")
         dcaPositions = decode("dcaPositions")
+        accounts = decode("accounts")
 
         if let code = json["baseCurrency"] as? String, let cur = Currency(rawValue: code) {
             baseCurrency = cur
@@ -612,7 +799,7 @@ final class PersistenceService: ObservableObject {
 
         saveTransactions(); saveHoldings(); saveBudgets()
         saveCustomCategories(); saveDividends(); saveRecurring()
-        savePriceAlerts(); saveDCA()
+        savePriceAlerts(); saveDCA(); saveAccounts()
         updateWidgetSnapshot()
         return transactions.count
     }
