@@ -537,6 +537,35 @@ final class PersistenceService: ObservableObject {
             .sorted { $0.maturityDate < $1.maturityDate }
     }
 
+    /// 有設年利率的現金戶口，依利率由高到低排序
+    var interestBearingCashAccounts: [Account] {
+        activeAccounts.filter { $0.type == .cash && $0.hasInterestRate }
+            .sorted { $0.annualRate > $1.annualRate }
+    }
+
+    /// 有設年利率的現金戶口餘額合計（基準幣種）。用作收息頁的息率分母
+    var interestBearingCashBalance: Double {
+        interestBearingCashAccounts.reduce(0) { $0 + balanceInBaseCurrency(for: $1) }
+    }
+
+    /// 現金戶口的年化利息合計（基準幣種），按當前餘額估算
+    var totalCashAnnualInterest: Double {
+        interestBearingCashAccounts.reduce(0) { total, account in
+            let interest = account.savingsAnnualInterest(balance: currentBalance(for: account))
+            return total + ExchangeRateProvider.convert(interest, from: account.currency, to: baseCurrency)
+        }
+    }
+
+    /// 存款利息年化合計（現金戶口 + 定期）。收息頁與財務顧問都用這個口徑
+    var totalDepositAnnualInterest: Double {
+        totalCashAnnualInterest + totalFixedDepositAnnualInterest
+    }
+
+    /// 生息存款本金合計（基準幣種）：生息現金戶口餘額加定期本金
+    var totalInterestBearingPrincipal: Double {
+        interestBearingCashBalance + totalFixedDepositPrincipal
+    }
+
     /// 帳戶總資產（基準幣種）。多個投資帳戶只計一次組合市值，避免資產翻倍
     var totalAccountAssets: Double {
         var total = totalCashAccountBalance + totalFixedDepositValue

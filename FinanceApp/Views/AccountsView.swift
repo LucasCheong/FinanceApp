@@ -109,13 +109,13 @@ struct AccountsView: View {
                 }
             }
 
-            if persistence.totalFixedDepositAnnualInterest > 0 {
+            if persistence.totalDepositAnnualInterest > 0 {
                 HStack {
-                    Label("定期年化利息", systemImage: "percent")
+                    Label("存款年化利息", systemImage: "percent")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text(persistence.totalFixedDepositAnnualInterest.moneyString(currency: persistence.baseCurrency))
+                    Text(persistence.totalDepositAnnualInterest.moneyString(currency: persistence.baseCurrency))
                         .font(.caption.bold())
                         .foregroundStyle(.orange)
                 }
@@ -328,6 +328,11 @@ struct AccountRow: View {
                 fixedDepositDetail
             }
 
+            if account.type == .cash, account.hasInterestRate {
+                Divider()
+                cashInterestDetail
+            }
+
             if account.type == .investment {
                 Divider()
                 Text("餘額連動組合分頁的持倉市值")
@@ -348,6 +353,40 @@ struct AccountRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.financePrimary.opacity(0.15), lineWidth: 1)
         )
+    }
+
+    // MARK: 儲蓄利息明細
+    /// 現金戶口的利息隨餘額浮動，只能估算，故不顯示「已累積利息」
+    private var cashInterestDetail: some View {
+        HStack(alignment: .bottom, spacing: 16) {
+            Label("\((account.annualRate * 100).compactString())% 年利率", systemImage: "percent")
+                .font(.caption)
+                .foregroundStyle(.orange)
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("年化利息")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(annualInterest.moneyString(currency: account.currency))
+                    .font(.caption.bold())
+                    .foregroundStyle(.gain)
+            }
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("每月約")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text((annualInterest / 12).moneyString(currency: account.currency))
+                    .font(.caption.bold())
+            }
+        }
+    }
+
+    /// 按當前餘額估算的年化利息
+    private var annualInterest: Double {
+        account.savingsAnnualInterest(balance: balance)
     }
 
     // MARK: 定期存款明細
@@ -510,6 +549,9 @@ struct AccountEditorView: View {
                 switch type {
                 case .cash:
                     cashSection
+                    if draft.hasInterestRate {
+                        cashInterestPreview
+                    }
                 case .investment:
                     investmentSection
                 case .fixedDeposit:
@@ -579,6 +621,16 @@ struct AccountEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
+            HStack {
+                Text("年利率")
+                Spacer()
+                TextField("可選，例如 1.5", text: $ratePercent)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                Text("%")
+                    .foregroundStyle(.secondary)
+            }
+
             if let existing, existing.type == .cash {
                 HStack {
                     Text("記帳淨額")
@@ -595,7 +647,7 @@ struct AccountEditorView: View {
                 }
             }
         } footer: {
-            Text("填入開始使用本 App 時的戶口餘額。之後每筆記帳指定此帳戶，餘額會自動加減。")
+            Text("填入開始使用本 App 時的戶口餘額。之後每筆記帳指定此帳戶，餘額會自動加減。儲蓄戶口可填年利率，利息會計入收息頁；活期戶口留空即可。")
         }
     }
 
@@ -665,6 +717,31 @@ struct AccountEditorView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 儲蓄利息預覽
+    /// 按當前餘額估算，不套複利（餘額會隨記帳浮動，複利沒有意義）
+    private var cashInterestPreview: some View {
+        Section {
+            LabeledRow(title: "計息餘額", value: draftBalance.moneyString(currency: currency))
+            LabeledRow(title: "年化利息", value: draftCashInterest.moneyString(currency: currency), highlight: true)
+            LabeledRow(title: "每月約", value: (draftCashInterest / 12).moneyString(currency: currency))
+            LabeledRow(title: "每日約", value: (draftCashInterest / 365).moneyString(currency: currency))
+        } header: {
+            Text("儲蓄利息試算")
+        } footer: {
+            Text("利息只計入收息頁的年度收入，不會自動加進餘額。銀行實際派息時記一筆收入即可，不會重複計算。")
+        }
+    }
+
+    /// 草稿帳戶目前的餘額
+    private var draftBalance: Double {
+        persistence.currentBalance(for: draft)
+    }
+
+    /// 草稿現金戶口的年化利息
+    private var draftCashInterest: Double {
+        draft.savingsAnnualInterest(balance: draftBalance)
     }
 
     // MARK: - 利息預覽

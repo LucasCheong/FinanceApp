@@ -60,7 +60,9 @@ enum AdvisorEngine {
         // cashBalance 已在 PersistenceService 改為「帳戶現金總額 + 未歸屬記帳淨額」
         snapshot.cashBalance = max(0, persistence.cashBalance)
         snapshot.fixedDepositValue = persistence.totalFixedDepositValue
-        snapshot.fixedDepositInterest = persistence.totalFixedDepositAnnualInterest
+        // 生息現金戶口餘額已含在 cashBalance 內，另存一份只為了算存款息率
+        snapshot.interestBearingCashValue = persistence.interestBearingCashBalance
+        snapshot.depositInterest = persistence.totalDepositAnnualInterest
 
         // 息率回退表：報價帶不回真實派息數據時才用
         var yieldBySymbol: [String: Double] = [:]
@@ -369,11 +371,11 @@ enum AdvisorEngine {
             }
         }
 
-        // 7. 被動收入覆蓋率（股息 + 定期利息）
+        // 7. 被動收入覆蓋率（股息 + 存款利息）
         if snapshot.annualPassiveIncome > 0 && snapshot.monthlyExpense > 0 {
             let coverage = snapshot.dividendCoverage
-            let incomeBreakdown = snapshot.fixedDepositInterest > 0
-                ? "年被動收入 \(money(snapshot.annualPassiveIncome, snapshot))（股息 \(money(snapshot.annualDividendIncome, snapshot))、定期利息 \(money(snapshot.fixedDepositInterest, snapshot))）"
+            let incomeBreakdown = snapshot.depositInterest > 0
+                ? "年被動收入 \(money(snapshot.annualPassiveIncome, snapshot))（股息 \(money(snapshot.annualDividendIncome, snapshot))、存款利息 \(money(snapshot.depositInterest, snapshot))）"
                 : "年股息 \(money(snapshot.annualDividendIncome, snapshot))"
             if coverage >= 1.0 {
                 findings.append(AdvisorFinding(
@@ -452,8 +454,8 @@ enum AdvisorEngine {
     private static func neededCapital(_ snapshot: FinancialSnapshot) -> Double {
         let annualExpense = snapshot.monthlyExpense * 12
         let gap = max(0, annualExpense - snapshot.annualPassiveIncome)
-        // 以目前收息型資產（含定期）的實際平均息率估算，無數據時用 5%
-        let incomeAssets = snapshot.totalIncomeAssets + snapshot.fixedDepositValue
+        // 以目前收息型資產（含生息存款）的實際平均息率估算，無數據時用 5%
+        let incomeAssets = snapshot.totalIncomeAssets + snapshot.totalDepositPrincipal
         let yieldRate = incomeAssets > 0
             ? max(0.01, snapshot.annualPassiveIncome / incomeAssets)
             : 0.05

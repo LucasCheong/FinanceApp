@@ -30,16 +30,21 @@ struct DividendCalculatorView: View {
         }
     }
 
-    // 定期存款利息（年化口徑，已到期的不計）
-    var depositAnnualInterest: Double { persistence.totalFixedDepositAnnualInterest }
+    // 存款利息（儲蓄戶口 + 定期，年化口徑，已到期的定期不計）
+    var depositAnnualInterest: Double { persistence.totalDepositAnnualInterest }
     var depositMonthlyInterest: Double { depositAnnualInterest / 12 }
     var depositDailyInterest: Double { depositAnnualInterest / 365 }
 
-    // 總計 = 股息 + 定期利息
+    /// 是否有任何存款利息來源
+    var hasDepositInterest: Bool {
+        !persistence.interestBearingCashAccounts.isEmpty || !persistence.activeFixedDeposits.isEmpty
+    }
+
+    // 總計 = 股息 + 存款利息
     var totalDailyIncome: Double { dividendDailyIncome + depositDailyInterest }
     var totalMonthlyIncome: Double { dividendMonthlyIncome + depositMonthlyInterest }
     var totalAnnualIncome: Double { dividendAnnualIncome + depositAnnualInterest }
-    var totalInvestment: Double { dividendInvestment + persistence.totalFixedDepositPrincipal }
+    var totalInvestment: Double { dividendInvestment + persistence.totalInterestBearingPrincipal }
 
     var averageYield: Double {
         totalInvestment > 0 ? totalAnnualIncome / totalInvestment : 0
@@ -55,14 +60,14 @@ struct DividendCalculatorView: View {
                     // 收入分解
                     incomeBreakdownCard
 
-                    // 定期存款利息
-                    if !persistence.activeFixedDeposits.isEmpty {
-                        fixedDepositCard
+                    // 存款利息
+                    if hasDepositInterest {
+                        depositInterestCard
                     }
 
                     // 收息持倉列表
                     if persistence.dividendPositions.isEmpty {
-                        if persistence.activeFixedDeposits.isEmpty {
+                        if !hasDepositInterest {
                             emptyState
                         }
                     } else {
@@ -110,10 +115,10 @@ struct DividendCalculatorView: View {
                             .font(.caption)
                     }
                     HStack(spacing: 4) {
-                        Image(systemName: AccountType.fixedDeposit.systemIcon)
+                        Image(systemName: "percent")
                             .font(.caption2)
                             .foregroundStyle(.orange)
-                        Text("定期利息 \(depositAnnualInterest.moneyString(currency: persistence.baseCurrency))")
+                        Text("存款利息 \(depositAnnualInterest.moneyString(currency: persistence.baseCurrency))")
                             .font(.caption)
                     }
                 }
@@ -138,12 +143,12 @@ struct DividendCalculatorView: View {
         .cardStyle()
     }
 
-    // MARK: - 定期存款利息卡片
-    /// 定期利息一律以年化口徑併入被動收入，方便與股息並列比較
-    private var fixedDepositCard: some View {
+    // MARK: - 存款利息卡片
+    /// 儲蓄戶口與定期的利息一律以年化口徑併入被動收入，方便與股息並列比較
+    private var depositInterestCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("定期存款利息", systemImage: AccountType.fixedDeposit.systemIcon)
+                Label("存款利息", systemImage: "percent")
                     .font(.headline)
                 Spacer()
                 Text(depositAnnualInterest.moneyString(currency: persistence.baseCurrency) + " / 年")
@@ -151,45 +156,93 @@ struct DividendCalculatorView: View {
                     .foregroundStyle(.orange)
             }
 
-            ForEach(persistence.activeFixedDeposits) { account in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(account.displayName)
-                            .font(.subheadline)
-                        Spacer()
-                        Text((account.annualRate * 100).compactString() + "%")
-                            .font(.caption.bold())
-                            .foregroundStyle(.orange)
-                    }
-
-                    HStack {
-                        Text("本金 " + account.principal.moneyString(currency: account.currency))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if account.isMatured {
-                            Text("已到期，不再計息")
-                                .font(.caption2)
-                                .foregroundStyle(.gain)
-                        } else {
-                            Text("年利息 " + account.annualInterest.moneyString(currency: account.currency))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    ProgressView(value: account.termProgress)
-                        .tint(account.isMatured ? .gain : .orange)
+            if !persistence.interestBearingCashAccounts.isEmpty {
+                Label("儲蓄戶口", systemImage: AccountType.cash.systemIcon)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                ForEach(persistence.interestBearingCashAccounts) { account in
+                    cashInterestRow(account)
                 }
-                .padding(.vertical, 4)
             }
 
-            Text("在記帳分頁的「我的帳戶」中維護定期存款條款")
+            if !persistence.activeFixedDeposits.isEmpty {
+                if !persistence.interestBearingCashAccounts.isEmpty {
+                    Divider()
+                }
+                Label("定期存款", systemImage: AccountType.fixedDeposit.systemIcon)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                ForEach(persistence.activeFixedDeposits) { account in
+                    fixedDepositRow(account)
+                }
+            }
+
+            Text("在記帳分頁的「我的帳戶」中維護利率與存款條款")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .cardStyle()
+    }
+
+    /// 儲蓄戶口一行：利率、計息餘額、年利息。餘額隨記帳浮動，沒有存期進度
+    private func cashInterestRow(_ account: Account) -> some View {
+        let balance = persistence.currentBalance(for: account)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(account.displayName)
+                    .font(.subheadline)
+                Spacer()
+                Text((account.annualRate * 100).compactString() + "%")
+                    .font(.caption.bold())
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
+                Text("餘額 " + balance.moneyString(currency: account.currency))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("年利息 " + account.savingsAnnualInterest(balance: balance).moneyString(currency: account.currency))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// 定期一行：利率、本金、年利息、存期進度
+    private func fixedDepositRow(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(account.displayName)
+                    .font(.subheadline)
+                Spacer()
+                Text((account.annualRate * 100).compactString() + "%")
+                    .font(.caption.bold())
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
+                Text("本金 " + account.principal.moneyString(currency: account.currency))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if account.isMatured {
+                    Text("已到期，不再計息")
+                        .font(.caption2)
+                        .foregroundStyle(.gain)
+                } else {
+                    Text("年利息 " + account.annualInterest.moneyString(currency: account.currency))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            ProgressView(value: account.termProgress)
+                .tint(account.isMatured ? .gain : .orange)
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - 收入分解卡片

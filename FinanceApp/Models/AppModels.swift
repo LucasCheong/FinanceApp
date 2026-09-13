@@ -110,7 +110,7 @@ enum AccountType: String, Codable, CaseIterable {
 
     var explanation: String {
         switch self {
-        case .cash: return "活期或儲蓄戶口，餘額由起始金額加上記帳收支推算"
+        case .cash: return "活期或儲蓄戶口，餘額由起始金額加上記帳收支推算，可設年利率"
         case .investment: return "餘額自動連動組合分頁的持倉市值，不需手填"
         case .fixedDeposit: return "定期存款，按年利率計息，利息會計入收息頁"
         }
@@ -153,10 +153,11 @@ struct Account: Identifiable, Codable {
     /// 現金帳戶的起始餘額，記帳收支在此之上累加
     var initialBalance: Double = 0
 
+    /// 年利率（小數，0.035 = 3.5%）。現金戶口按當前餘額計息，定期按存入本金計息
+    var annualRate: Double = 0
+
     // MARK: 定期存款專用欄位
     var principal: Double = 0
-    /// 年利率（小數，0.035 = 3.5%）
-    var annualRate: Double = 0
     var startDate: Date = Date()
     /// 存期（月）
     var termMonths: Int = 12
@@ -221,6 +222,18 @@ struct Account: Identifiable, Codable {
         }
         let growth = pow(1 + annualRate / Double(periodsPerYear), Double(periodsPerYear) * years)
         return principal * (growth - 1)
+    }
+
+    // MARK: - 儲蓄利息（現金戶口）
+
+    /// 是否已設定利率。現金戶口的利率是選填的
+    var hasInterestRate: Bool { annualRate > 0 }
+
+    /// 現金戶口的年化利息。餘額會隨記帳浮動，故由外部將當前餘額傳入；
+    /// 且不套用複利，因為實際派息會作為一筆收入記帳進來，再算複利會重複計算。
+    func savingsAnnualInterest(balance: Double) -> Double {
+        guard type == .cash, annualRate > 0, balance > 0 else { return 0 }
+        return balance * annualRate
     }
 }
 

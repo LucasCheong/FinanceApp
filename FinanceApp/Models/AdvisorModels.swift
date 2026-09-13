@@ -266,8 +266,10 @@ struct FinancialSnapshot {
     var annualDividendIncome: Double = 0
     /// 定期存款本金加已累積利息
     var fixedDepositValue: Double = 0
-    /// 定期存款的年化利息
-    var fixedDepositInterest: Double = 0
+    /// 有設年利率的現金戶口餘額（已含在 cashBalance 內，此欄僅用於息率分母）
+    var interestBearingCashValue: Double = 0
+    /// 存款的年化利息（儲蓄戶口 + 定期）
+    var depositInterest: Double = 0
     var totalAssets: Double = 0
 
     // 股票持倉依息率拆分（息率 ≥ 4% 歸為收息型）
@@ -283,8 +285,11 @@ struct FinancialSnapshot {
     /// 收息型資產總額（收息倉 + 高息股票持倉）
     var totalIncomeAssets: Double { dividendValue + incomeStockValue }
 
-    /// 年度被動收入（股息 + 定期利息）
-    var annualPassiveIncome: Double { annualDividendIncome + fixedDepositInterest }
+    /// 生息存款本金（儲蓄戶口餘額 + 定期），用作存款利息的息率分母
+    var totalDepositPrincipal: Double { interestBearingCashValue + fixedDepositValue }
+
+    /// 年度被動收入（股息 + 存款利息）
+    var annualPassiveIncome: Double { annualDividendIncome + depositInterest }
 
     // 比例
     var growthRatio: Double = 0
