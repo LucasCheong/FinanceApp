@@ -29,6 +29,8 @@ struct SettingsView: View {
     @State private var isSyncing = false
     @State private var syncMessage = ""
     @State private var showingSyncResult = false
+    @State private var appLockError: String?
+    @State private var showingAppLockError = false
 
     // AI 顧問
     @StateObject private var llm = LLMService.shared
@@ -186,7 +188,7 @@ struct SettingsView: View {
 
                 // MARK: - 安全與通知
                 Section("安全與通知") {
-                    Toggle(isOn: $appLockEnabled) {
+                    Toggle(isOn: appLockBinding) {
                         Label("Face ID / Touch ID 鎖", systemImage: "faceid")
                     }
                     Toggle(isOn: $priceAlertNotifications) {
@@ -334,10 +336,38 @@ struct SettingsView: View {
             } message: {
                 Text(llmTestMessage)
             }
+            .alert("無法啟用 App 鎖", isPresented: $showingAppLockError) {
+                Button("確定") { }
+            } message: {
+                Text(appLockError ?? "")
+            }
         }
     }
 
     // MARK: - Bindings
+
+    /// App 鎖開關 Binding：啟用前先確認裝置真的驗得了，否則開了就再也進不了 App
+    private var appLockBinding: Binding<Bool> {
+        Binding(
+            get: { appLockEnabled },
+            set: { newValue in
+                guard newValue else {
+                    appLockEnabled = false
+                    return
+                }
+                let context = LAContext()
+                var error: NSError?
+                // 用 deviceOwnerAuthentication 而非…WithBiometrics，核驗管道含裝置密碼
+                if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+                    appLockEnabled = true
+                } else {
+                    appLockEnabled = false
+                    appLockError = "此裝置尚未設定面容、指紋或螢幕密碼，請先到「設定」設定完再回來開啟。\n\n\(error?.localizedDescription ?? "")"
+                    showingAppLockError = true
+                }
+            }
+        )
+    }
 
     /// 基準幣種選擇 Binding：選擇時先彈出確認對話框
     private var pickerBinding: Binding<Currency> {
@@ -491,58 +521,140 @@ struct SettingsView: View {
 }
 
 // MARK: - App 鎖畫面
+/// 鎖屏以 overlay 疊在 ContentView 之上，而不是取代它，這樣回前台重新上鎖時不會把各分頁的狀態洗掉。
 struct AppLockView: View {
     @AppStorage("appLockEnabled") private var appLockEnabled = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isUnlocked = false
+    @State private var isAuthenticating = false
+    /// 本次上鎖已自動彈過核驗，避免取消後回到前台又立即彈一次而陷入循環
+    @State private var didPromptThisLock = false
+    @State private var failureMessage: String?
 
     var body: some View {
-        Group {
-            if !appLockEnabled || isUnlocked {
-                ContentView()
-            } else {
-                VStack(spacing: 20) {
-                    Image(systemName: "lock.shield.fill")
-                        .font(.system(size: 64))
-                        .foregroundStyle(.financePrimary)
-                    Text("財務管家已鎖定")
-                        .font(.headline)
-                    Text("點擊解鎖以繼續使用")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        authenticate()
-                    } label: {
-                        Label("解鎖", systemImage: "faceid")
-                            .font(.headline)
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 12)
-                            .background(Color.financePrimary)
-                            .foregroundStyle(.white)
-                            .cornerRadius(12)
-                    }
+        ContentView()
+            .overlay {
+                if appLockEnabled && !isUnlocked {
+                    lockScreen
                 }
             }
+            .onAppear {
+                autoPrompt()
+            }
+            .onChange(of: scenePhase) { phase in
+                switch phase {
+                case .background:
+                    // 進背景就重新上鎖（面容核驗彈窗只會讓 phase 變 inactive，不會誤觸）
+                    if appLockEnabled {
+                        isUnlocked = false
+                        didPromptThisLock = false
+                        failureMessage = nil
+                    }
+                case .active:
+                    autoPrompt()
+                default:
+                    break
+                }
+            }
+    }
+
+    // MARK: - 鎖屏
+    private var lockScreen: some View {
+        ZStack {
+            // 不透光背景，確保底下的金額不會被看見
+            Color(.systemBackground)
+
+            VStack(spacing: 20) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 64))
+                    .foregroundStyle(.financePrimary)
+                Text("財務管家已鎖定")
+                    .font(.headline)
+
+                if let failureMessage {
+                    Text(failureMessage)
+                        .font(.caption)
+                        .foregroundStyle(.loss)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                } else {
+                    Text("核驗身分以繼續使用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    authenticate()
+                } label: {
+                    Label("解鎖", systemImage: "faceid")
+                        .font(.headline)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 12)
+                        .background(Color.financePrimary)
+                        .foregroundStyle(.white)
+                        .cornerRadius(12)
+                }
+                .disabled(isAuthenticating)
+            }
         }
-        .onAppear {
-            if appLockEnabled {
-                authenticate()
+        .ignoresSafeArea()
+        .transition(.opacity)
+    }
+
+    // MARK: - 核驗
+
+    /// 進入或回到前台時自動彈一次；被取消後不再自動重試，由使用者按「解鎖」
+    private func autoPrompt() {
+        guard appLockEnabled, !isUnlocked, !isAuthenticating, !didPromptThisLock else { return }
+        didPromptThisLock = true
+        authenticate()
+    }
+
+    private func authenticate() {
+        guard !isAuthenticating else { return }
+
+        let context = LAContext()
+        context.localizedFallbackTitle = "使用裝置密碼"
+        var error: NSError?
+
+        // deviceOwnerAuthentication 含密碼備援：面容識別失效時還有路可走，不會被鎖在外面
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            // 裝置連密碼都沒設，繼續鎖著就是永久進不了，此時直接放行並關掉開關
+            appLockEnabled = false
+            isUnlocked = true
+            return
+        }
+
+        isAuthenticating = true
+        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "解鎖財務管家") { success, authError in
+            DispatchQueue.main.async {
+                isAuthenticating = false
+                if success {
+                    isUnlocked = true
+                    failureMessage = nil
+                } else {
+                    failureMessage = Self.describe(authError)
+                }
             }
         }
     }
 
-    private func authenticate() {
-        let context = LAContext()
-        var error: NSError?
-
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "解鎖財務管家") { success, _ in
-                DispatchQueue.main.async {
-                    isUnlocked = success
-                }
-            }
-        } else {
-            // 沒有生物識別，直接解鎖
-            isUnlocked = true
+    /// 把 LAError 譯成使用者看得懂的話
+    private static func describe(_ error: Error?) -> String {
+        guard let code = (error as? LAError)?.code else {
+            return "核驗未完成，請再試一次"
+        }
+        switch code {
+        case .userCancel, .appCancel, .systemCancel:
+            return "已取消核驗，請按「解鎖」重試"
+        case .userFallback:
+            return "請改用裝置密碼核驗"
+        case .biometryLockout:
+            return "面容識別已被鎖定，請按「解鎖」並輸入裝置密碼"
+        case .biometryNotEnrolled, .biometryNotAvailable:
+            return "此裝置無法使用面容識別，請改用裝置密碼"
+        default:
+            return "核驗失敗，請再試一次"
         }
     }
 }

@@ -40,6 +40,8 @@
     <string>需要存取相簿選擇發票照片進行批量導入識別</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>需要保存處理後的發票圖片到相簿</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>需要使用面容識別解鎖 App，保護你的財務資料不被他人查看</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
