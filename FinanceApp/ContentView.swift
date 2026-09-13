@@ -10,12 +10,6 @@ struct ContentView: View {
         _selectedTab = State(initialValue: UserDefaults.standard.integer(forKey: "defaultTab"))
     }
 
-    @State private var showingBudget = false
-    @State private var showingAlertCenter = false
-    @State private var showingAssetAllocation = false
-    @State private var showingExchangeRate = false
-    @State private var showingAccounts = false
-
     @AppStorage("colorScheme") private var colorScheme = "system"
 
     /// 標籤定義：圖標與標題
@@ -47,33 +41,15 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 分頁內容
+    // MARK: - 分頁頁面
+    /// 各分頁自帶 NavigationStack，工具欄須定義在各自的 NavigationStack 內部。
+    /// 從這裡對分頁視圖加 .toolbar 不會生效，因為修飾器落在 NavigationStack 之外。
     @ViewBuilder
     private var content: some View {
         switch selectedTab {
         case 0:
             // 記帳
             AccountingView()
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button { showingAccounts = true } label: {
-                                Label("我的帳戶", systemImage: "building.columns")
-                            }
-                            Button { showingBudget = true } label: {
-                                Label("預算管理", systemImage: "creditcard.fill")
-                            }
-                            Button { showingExchangeRate = true } label: {
-                                Label("匯率走勢", systemImage: "chart.line.uptrend.xyaxis")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                    }
-                }
-                .sheet(isPresented: $showingBudget) { BudgetView() }
-                .sheet(isPresented: $showingExchangeRate) { ExchangeRateView() }
-                .sheet(isPresented: $showingAccounts) { AccountsView() }
 
         case 1:
             // 發票導入
@@ -82,26 +58,10 @@ struct ContentView: View {
         case 2:
             // 市場看板
             MarketDashboardView()
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showingAlertCenter = true } label: {
-                            Image(systemName: "bell.badge")
-                        }
-                    }
-                }
-                .sheet(isPresented: $showingAlertCenter) { AlertCenterView() }
 
         case 3:
             // 投資組合
             PortfolioView()
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showingAssetAllocation = true } label: {
-                            Image(systemName: "chart.pie.fill")
-                        }
-                    }
-                }
-                .sheet(isPresented: $showingAssetAllocation) { AssetAllocationView() }
 
         case 4:
             // 收息

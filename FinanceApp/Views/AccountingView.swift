@@ -7,6 +7,9 @@ struct AccountingView: View {
     @State private var showingAnalysis = false
     @State private var selectedFilter: TransactionFilter = .all
     @State private var searchText = ""
+    @State private var showingAccounts = false
+    @State private var showingBudget = false
+    @State private var showingExchangeRate = false
 
     enum TransactionFilter: String, CaseIterable {
         case all = "全部"
@@ -73,6 +76,21 @@ struct AccountingView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack {
+                        Menu {
+                            Button { showingAccounts = true } label: {
+                                Label("我的帳戶", systemImage: "building.columns")
+                            }
+                            Button { showingBudget = true } label: {
+                                Label("預算管理", systemImage: "creditcard.fill")
+                            }
+                            Button { showingExchangeRate = true } label: {
+                                Label("匯率走勢", systemImage: "chart.line.uptrend.xyaxis")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title2)
+                                .foregroundStyle(.financePrimary)
+                        }
                         Button {
                             showingAnalysis = true
                         } label: {
@@ -95,6 +113,15 @@ struct AccountingView: View {
             }
             .sheet(isPresented: $showingAnalysis) {
                 ExpenseAnalysisView()
+            }
+            .sheet(isPresented: $showingAccounts) {
+                AccountsView()
+            }
+            .sheet(isPresented: $showingBudget) {
+                BudgetView()
+            }
+            .sheet(isPresented: $showingExchangeRate) {
+                ExchangeRateView()
             }
         }
     }

@@ -9,6 +9,7 @@ struct MarketDashboardView: View {
     @State private var etfLiveQuotes: [String: StockQuote] = [:]   // ETF 實時報價快取
     @State private var lastRefreshTime: Date?                      // 最後刷新時間
     @State private var maSignals: [MovingAverageSignal] = []       // 均線信號
+    @State private var showingAlertCenter = false                  // 價格警報中心
 
     enum MarketFilter: String, CaseIterable {
         case all = "全部"
@@ -141,15 +142,25 @@ struct MarketDashboardView: View {
             .navigationTitle("市場看板")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await refreshData() }
-                    } label: {
-                        Image(systemName: stockService.isLoading ? "arrow.clockwise.circle" : "arrow.clockwise")
-                            .rotationEffect(.degrees(stockService.isLoading ? 360 : 0))
-                            .animation(stockService.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: stockService.isLoading)
+                    HStack {
+                        Button {
+                            showingAlertCenter = true
+                        } label: {
+                            Image(systemName: "bell.badge")
+                        }
+                        Button {
+                            Task { await refreshData() }
+                        } label: {
+                            Image(systemName: stockService.isLoading ? "arrow.clockwise.circle" : "arrow.clockwise")
+                                .rotationEffect(.degrees(stockService.isLoading ? 360 : 0))
+                                .animation(stockService.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: stockService.isLoading)
+                        }
+                        .disabled(stockService.isLoading)
                     }
-                    .disabled(stockService.isLoading)
                 }
+            }
+            .sheet(isPresented: $showingAlertCenter) {
+                AlertCenterView()
             }
             .task {
                 await refreshData()

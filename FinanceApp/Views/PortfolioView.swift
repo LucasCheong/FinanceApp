@@ -8,6 +8,7 @@ struct PortfolioView: View {
     @State private var showingAddHolding = false
     @State private var isRefreshing = false
     @State private var currentQuotes: [String: StockQuote] = [:]
+    @State private var showingAssetAllocation = false
 
     // 計算總股票市值（轉換為基準幣種）
     var totalStockValue: Double {
@@ -88,6 +89,11 @@ struct PortfolioView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack {
                         Button {
+                            showingAssetAllocation = true
+                        } label: {
+                            Image(systemName: "chart.pie.fill")
+                        }
+                        Button {
                             showingAddHolding = true
                         } label: {
                             Image(systemName: "plus.circle.fill")
@@ -102,6 +108,9 @@ struct PortfolioView: View {
             }
             .sheet(isPresented: $showingAddHolding) {
                 AddHoldingView()
+            }
+            .sheet(isPresented: $showingAssetAllocation) {
+                AssetAllocationView()
             }
             .task {
                 await refreshPrices()
