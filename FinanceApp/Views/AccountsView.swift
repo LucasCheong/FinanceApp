@@ -5,6 +5,8 @@ import SwiftUI
 /// 現金帳戶餘額 = 起始餘額 + 記帳收支；投資帳戶連動組合市值；定期按利率計息。
 struct AccountsView: View {
     @StateObject private var persistence = PersistenceService.shared
+    /// 總資產含股票市值，所以要跟著報價快取重畫
+    @StateObject private var stockService = StockService.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingAddAccount = false
@@ -37,6 +39,10 @@ struct AccountsView: View {
                 .padding()
             }
             .navigationTitle("我的帳戶")
+            .task {
+                // 進頁面就拉一次持倉報價，不然總資產裡的股票只能用成本價
+                await stockService.refreshHoldingQuotes(for: persistence.holdings)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("完成") { dismiss() }
@@ -98,9 +104,9 @@ struct AccountsView: View {
                     icon: AccountType.fixedDeposit.systemIcon,
                     color: .orange
                 )
-                if persistence.activeAccounts.contains(where: { $0.type == .investment }) {
+                if !persistence.holdings.isEmpty {
                     AssetBreakdownItem(
-                        title: "投資",
+                        title: "股票",
                         amount: persistence.portfolioMarketValue(in: persistence.baseCurrency),
                         currency: persistence.baseCurrency,
                         icon: AccountType.investment.systemIcon,

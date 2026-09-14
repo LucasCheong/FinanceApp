@@ -316,6 +316,8 @@ struct PortfolioView: View {
             for quote in stockService.quotes {
                 currentQuotes[quote.symbol] = quote
             }
+            // 同步到持倉快取，帳戶頁的總資產才拿得到同一份市值
+            stockService.cacheHoldingQuotes(stockService.quotes)
             isRefreshing = false
         }
     }
@@ -419,6 +421,11 @@ struct AddHoldingView: View {
     @State private var market: StockHolding.StockMarket = .us
     @State private var isCustom = false
 
+    // 手動輸入代碼後的查價狀態
+    @State private var isLookingUp = false
+    @State private var lookupResult: StockQuote?
+    @State private var lookupError: String?
+
     var searchResults: [StockInfo] {
         if searchText.isEmpty {
             return StockDatabase.allStocks
@@ -435,11 +442,48 @@ struct AddHoldingView: View {
                     if isCustom {
                         TextField("股票代碼 (如 AAPL 或 0700.HK)", text: $customSymbol)
                             .textInputAutocapitalization(.characters)
-                        TextField("股票名稱", text: $customName)
-                        Picker("市場", selection: $market) {
-                            ForEach(StockHolding.StockMarket.allCases, id: \.self) { m in
-                                Text(m.rawValue).tag(m)
+                            .autocorrectionDisabled()
+                            .onChange(of: customSymbol) { _ in
+                                market = detectedMarket
+                                // 代碼真的改了才丟掉上一次的查價結果
+                                if lookupResult?.symbol != normalizedSymbol {
+                                    lookupResult = nil
+                                    lookupError = nil
+                                }
                             }
+                        TextField("股票名稱（查價後自動填入）", text: $customName)
+
+                        // 市場由代碼自動識別，手選只會與實際查價的市場矛盾
+                        HStack {
+                            Text("市場")
+                            Spacer()
+                            Text(normalizedSymbol.isEmpty ? "—" : "\(detectedMarket.flag) \(detectedMarket.rawValue)")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            Task { await lookupQuote() }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isLookingUp {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.down.circle")
+                                }
+                                Text(isLookingUp ? "查詢中…" : "查詢最新股價")
+                            }
+                        }
+                        .disabled(normalizedSymbol.isEmpty || isLookingUp)
+
+                        if let quote = lookupResult {
+                            quoteResultRow(quote)
+                        }
+
+                        if let lookupError {
+                            Text(lookupError)
+                                .font(.caption)
+                                .foregroundStyle(.loss)
                         }
                     } else if let selected = selectedStock {
                         // 已選擇股票 - 顯示選中卡片 + 更改按鈕
@@ -539,10 +583,102 @@ struct AddHoldingView: View {
 
     private var canSave: Bool {
         if isCustom {
-            return !customSymbol.isEmpty && Int(shares) ?? 0 > 0 && Double(purchasePrice) ?? 0 > 0
+            // 手動輸入必須先查到報價，否則代碼寫錯也不會有人發現
+            return lookupResult != nil && Int(shares) ?? 0 > 0 && Double(purchasePrice) ?? 0 > 0
         } else {
             return selectedStock != nil && Int(shares) ?? 0 > 0 && Double(purchasePrice) ?? 0 > 0
         }
+    }
+
+    // MARK: - 手動輸入的代碼處理
+
+    /// 把使用者輸入整理成 Yahoo Finance 認得的代碼：港股補足四位數字並加 .HK
+    private var normalizedSymbol: String {
+        let raw = customSymbol.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !raw.isEmpty else { return "" }
+
+        if raw.hasSuffix(".HK") {
+            return padCode(String(raw.dropLast(3))) + ".HK"
+        }
+        // 純數字一律視為港股代碼，美股不會是純數字
+        if raw.allSatisfy(\.isNumber) {
+            return padCode(raw) + ".HK"
+        }
+        return raw
+    }
+
+    private func padCode(_ digits: String) -> String {
+        guard digits.allSatisfy(\.isNumber), digits.count < 4 else { return digits }
+        return String(repeating: "0", count: 4 - digits.count) + digits
+    }
+
+    /// 市場由代碼看出來，不靠使用者自己選對
+    private var detectedMarket: StockHolding.StockMarket {
+        normalizedSymbol.hasSuffix(".HK") ? .hk : .us
+    }
+
+    /// 查價結果：確認代碼有效，並可一鍵把現價填成買入價
+    private func quoteResultRow(_ quote: StockQuote) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.gain)
+                Text(quote.symbol)
+                    .font(.subheadline.bold())
+                Text(quote.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            HStack {
+                Text(quote.currentPrice.moneyString(currency: Currency.from(market: detectedMarket)))
+                    .font(.headline)
+                Text(String(format: "%+.2f%%", quote.changePercent))
+                    .font(.caption)
+                    .foregroundStyle(quote.isPositive ? Color.gain : Color.loss)
+
+                Spacer()
+
+                Button("填入買入價") {
+                    purchasePrice = String(format: "%.2f", quote.currentPrice)
+                }
+                .font(.caption)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// 手動輸入的代碼要靠 API 確認存不存在，順便把最新價與名稱帶回來
+    @MainActor
+    private func lookupQuote() async {
+        let symbol = normalizedSymbol
+        guard !symbol.isEmpty else { return }
+
+        isLookingUp = true
+        lookupError = nil
+        lookupResult = nil
+
+        let probe = StockInfo(symbol: symbol, name: symbol, market: detectedMarket, dividendYield: 0)
+        let quote = await StockService.shared.fetchSingleQuote(for: probe)
+
+        isLookingUp = false
+
+        // fetchSingleQuote 失敗時會回一筆價格為 0 的後備報價，以此判定代碼是否有效
+        guard let quote, quote.currentPrice > 0 else {
+            lookupError = "查不到 \(symbol) 的報價。港股要寫成四位數字加 .HK（如 0700.HK），美股直接寫代號（如 AAPL）"
+            Haptics.warning()
+            return
+        }
+
+        customSymbol = symbol
+        market = detectedMarket
+        lookupResult = quote
+        if customName.isEmpty { customName = quote.name }
+        if purchasePrice.isEmpty { purchasePrice = String(format: "%.2f", quote.currentPrice) }
+        // 寫入快取，新增完成後市值與總資產立即就是最新價
+        StockService.shared.cacheHoldingQuotes([quote])
+        Haptics.success()
     }
 
     private func saveHolding() {
@@ -553,8 +689,9 @@ struct AddHoldingView: View {
         let name: String
 
         if isCustom {
-            symbol = customSymbol.uppercased()
-            name = customName.isEmpty ? customSymbol.uppercased() : customName
+            // 存正規化後的代碼，不然日後刷新報價會拉不到
+            symbol = normalizedSymbol
+            name = customName.isEmpty ? (lookupResult?.name ?? symbol) : customName
         } else if let stock = selectedStock {
             symbol = stock.symbol
             name = stock.name

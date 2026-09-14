@@ -514,9 +514,12 @@ final class PersistenceService: ObservableObject {
 
     /// 組合分頁持倉的市值（換算為指定幣種），取不到報價時回退買入價
     func portfolioMarketValue(in currency: Currency) -> Double {
-        let quotes = StockService.shared.quotes
+        let service = StockService.shared
         return holdings.reduce(0.0) { total, holding in
-            let price = quotes.first { $0.symbol == holding.symbol }?.currentPrice ?? holding.purchasePrice
+            // 先看持倉專用快取，再看市場看板那份 quotes，都沒有才用成本價
+            let live = service.holdingQuotes[holding.symbol]?.currentPrice
+                ?? service.quotes.first { $0.symbol == holding.symbol }?.currentPrice
+            let price = live.flatMap { $0 > 0 ? $0 : nil } ?? holding.purchasePrice
             let value = Double(holding.shares) * price
             return total + ExchangeRateProvider.convert(value, from: Currency.from(market: holding.market), to: currency)
         }
@@ -602,13 +605,10 @@ final class PersistenceService: ObservableObject {
         interestBearingCashBalance + totalFixedDepositPrincipal
     }
 
-    /// 帳戶總資產（基準幣種）。多個投資帳戶只計一次組合市值，避免資產翻倍
+    /// 帳戶總資產（基準幣種）：現金 + 定期 + 組合持倉市值。
+    /// 股票本身就是資產，沒建「投資帳戶」也要計入；建了也只計一次，不會翻倍。
     var totalAccountAssets: Double {
-        var total = totalCashAccountBalance + totalFixedDepositValue
-        if activeAccounts.contains(where: { $0.type == .investment }) {
-            total += portfolioMarketValue(in: baseCurrency)
-        }
-        return total
+        totalCashAccountBalance + totalFixedDepositValue + portfolioMarketValue(in: baseCurrency)
     }
 
     // MARK: - 計算屬性（以基準幣種結算）

@@ -8,6 +8,10 @@ final class StockService: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// 持倉報價快取（symbol → 報價）。市場看板每次刷新都會整批覆寫 quotes，
+    /// 持倉市值不能依賴那份資料，故另存一份只增不減的快取
+    @Published private(set) var holdingQuotes: [String: StockQuote] = [:]
+
     /// 實際派息記錄算出的股息率（以 symbol 為鍵），持久化於 UserDefaults
     @Published private(set) var dividendYieldRecords: [String: DividendYieldRecord] = [:]
     @Published var isRefreshingDividends = false
@@ -81,6 +85,42 @@ final class StockService: ObservableObject {
             print("獲取 \(stock.symbol) 報價失敗: \(error.localizedDescription)")
             return createFallbackQuote(for: stock)
         }
+    }
+
+    // MARK: - 持倉報價快取
+
+    /// 併入持倉報價快取。價格為 0 的後備報價不覆蓋既有資料
+    @MainActor
+    func cacheHoldingQuotes(_ incoming: [StockQuote]) {
+        for quote in incoming where quote.currentPrice > 0 {
+            holdingQuotes[quote.symbol] = quote
+        }
+    }
+
+    /// 拉取持倉最新報價並寫入快取。帳戶頁進來就能拿到市值，不用先去組合頁下拉
+    func refreshHoldingQuotes(for holdings: [StockHolding]) async {
+        guard !holdings.isEmpty else { return }
+
+        let infos = holdings.map {
+            StockInfo(symbol: $0.symbol, name: $0.name, market: $0.market, dividendYield: 0)
+        }
+
+        var fetched: [StockQuote] = []
+        for batch in stride(from: 0, to: infos.count, by: 5).map({ Array(infos[$0..<min($0 + 5, infos.count)]) }) {
+            let batchResults = await withTaskGroup(of: StockQuote?.self) { group -> [StockQuote] in
+                for info in batch {
+                    group.addTask { await self.fetchSingleQuote(for: info) }
+                }
+                var collected: [StockQuote] = []
+                for await quote in group {
+                    if let quote = quote { collected.append(quote) }
+                }
+                return collected
+            }
+            fetched.append(contentsOf: batchResults)
+        }
+
+        await cacheHoldingQuotes(fetched)
     }
 
     // MARK: - 解析 Yahoo Finance API 響應
