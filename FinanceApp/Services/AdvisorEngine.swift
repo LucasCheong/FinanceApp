@@ -64,11 +64,8 @@ enum AdvisorEngine {
         snapshot.interestBearingCashValue = persistence.interestBearingCashBalance
         snapshot.depositInterest = persistence.totalDepositAnnualInterest
 
-        // 息率回退表：報價帶不回真實派息數據時才用
-        var yieldBySymbol: [String: Double] = [:]
-        for stock in StockDatabase.allStocks where stock.dividendYield > 0 {
-            yieldBySymbol[stock.symbol] = stock.dividendYield
-        }
+        // 息率回退表：報價帶不回真實派息數據時才用。與收息計算器共用同一份，兩邊結論才會一致
+        let yieldBySymbol = StockDatabase.presetYieldBySymbol
 
         var stockValue = 0.0
         var stockCost = 0.0

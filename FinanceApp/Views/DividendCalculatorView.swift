@@ -3,31 +3,41 @@ import SwiftUI
 // MARK: - 收息計算器視圖 - 計算每天/每月/每年的利息收入
 struct DividendCalculatorView: View {
     @StateObject private var persistence = PersistenceService.shared
+    /// 高息股要等息率與報價回來才算得出，所以要跟著 StockService 重畫
+    @StateObject private var stockService = StockService.shared
     @State private var showingAddPosition = false
 
-    // 股息部分（以基準幣種結算）
+    /// 從股票組合自動帶入的高息股（息率達門檻者）
+    var incomeHoldings: [IncomeHolding] { persistence.incomeHoldings }
+
+    private func inBase(_ amount: Double, _ currency: Currency) -> Double {
+        ExchangeRateProvider.convert(amount, from: currency, to: persistence.baseCurrency)
+    }
+
+    // 股息部分（以基準幣種結算）：手動登記的收息股 + 組合中的高息股
     var dividendDailyIncome: Double {
-        persistence.dividendPositions.reduce(0) { total, pos in
-            total + ExchangeRateProvider.convert(pos.dailyDividendIncome, from: pos.currency, to: persistence.baseCurrency)
-        }
+        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.dailyDividendIncome, $1.currency) }
+            + incomeHoldings.reduce(0.0) { $0 + inBase($1.dailyDividendIncome, $1.currency) }
     }
 
     var dividendMonthlyIncome: Double {
-        persistence.dividendPositions.reduce(0) { total, pos in
-            total + ExchangeRateProvider.convert(pos.monthlyDividendIncome, from: pos.currency, to: persistence.baseCurrency)
-        }
+        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.monthlyDividendIncome, $1.currency) }
+            + incomeHoldings.reduce(0.0) { $0 + inBase($1.monthlyDividendIncome, $1.currency) }
     }
 
     var dividendAnnualIncome: Double {
-        persistence.dividendPositions.reduce(0) { total, pos in
-            total + ExchangeRateProvider.convert(pos.annualDividendIncome, from: pos.currency, to: persistence.baseCurrency)
-        }
+        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.annualDividendIncome, $1.currency) }
+            + incomeHoldings.reduce(0.0) { $0 + inBase($1.annualDividendIncome, $1.currency) }
     }
 
     var dividendInvestment: Double {
-        persistence.dividendPositions.reduce(0) { total, pos in
-            total + ExchangeRateProvider.convert(pos.totalInvestment, from: pos.currency, to: persistence.baseCurrency)
-        }
+        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.totalInvestment, $1.currency) }
+            + incomeHoldings.reduce(0.0) { $0 + inBase($1.totalInvestment, $1.currency) }
+    }
+
+    /// 高息股小計（卡片標題用）
+    var incomeHoldingsAnnual: Double {
+        incomeHoldings.reduce(0.0) { $0 + inBase($1.annualDividendIncome, $1.currency) }
     }
 
     // 存款利息（儲蓄戶口 + 定期，年化口徑，已到期的定期不計）
@@ -66,7 +76,7 @@ struct DividendCalculatorView: View {
                     }
 
                     // 收息持倉列表
-                    if persistence.dividendPositions.isEmpty {
+                    if persistence.dividendPositions.isEmpty && incomeHoldings.isEmpty {
                         if !hasDepositInterest {
                             emptyState
                         }
@@ -77,6 +87,13 @@ struct DividendCalculatorView: View {
                 .padding()
             }
             .navigationTitle("收息計算器")
+            .task {
+                // 息率與現價都齊了才辨得出哪些持倉算高息股，進頁面就補上
+                let symbols = persistence.holdings.map(\.symbol)
+                guard !symbols.isEmpty else { return }
+                await stockService.refreshHoldingQuotes(for: persistence.holdings)
+                await stockService.refreshDividendYields(for: symbols)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -285,21 +302,89 @@ struct DividendCalculatorView: View {
     /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
     private var positionsList: some View {
         VStack(spacing: 8) {
-            ForEach(persistence.dividendPositions) { position in
-                DividendPositionRow(position: position)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            persistence.deleteDividendPosition(position)
-                        } label: {
-                            Label("刪除持倉", systemImage: "trash")
+            if !persistence.dividendPositions.isEmpty {
+                ForEach(persistence.dividendPositions) { position in
+                    DividendPositionRow(position: position)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                persistence.deleteDividendPosition(position)
+                            } label: {
+                                Label("刪除持倉", systemImage: "trash")
+                            }
                         }
-                    }
+                }
+
+                Text("長按持倉可刪除")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
-            Text("長按持倉可刪除")
+            if !incomeHoldings.isEmpty {
+                incomeHoldingsCard
+            }
+        }
+    }
+
+    // MARK: - 組合中的高息股
+    /// 這批股息顧問報告本來就計入被動收入，這裡也要算進來，
+    /// 兩邊數字才對得上，也不用把同一隻股票在收息股再輸入一次。在股票分頁維護股數與買入價
+    private var incomeHoldingsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("組合中的高息股", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.headline)
+                Spacer()
+                Text(incomeHoldingsAnnual.moneyString(currency: persistence.baseCurrency) + " / 年")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.financePrimary)
+            }
+
+            ForEach(incomeHoldings) { holding in
+                incomeHoldingRow(holding)
+            }
+
+            Text("股票分頁中息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的持倉會自動計入被動收入，不用在這裡重複添加。已手動添加過的代碼不會重複計算。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity)
+        .cardStyle()
+    }
+
+    /// 高息股一行：息率、股數與計息基數、年息。數據不完整時直接說明，不讓使用者誤以為那是實測值
+    private func incomeHoldingRow(_ holding: IncomeHolding) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(holding.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Spacer()
+                Text(holding.annualYield.yieldPercent())
+                    .font(.caption.bold())
+                    .foregroundStyle(.financePrimary)
+            }
+
+            HStack {
+                Text("\(holding.shares) 股 · " + holding.totalInvestment.moneyString(currency: holding.currency))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("年息 " + holding.annualDividendIncome.moneyString(currency: holding.currency))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !holding.isLiveYield {
+                Text("息率為預設值，未取得實際派息記錄")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else if !holding.isLivePrice {
+                Text("計息基數用買入價，未取得即時報價")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - 空狀態
@@ -311,9 +396,11 @@ struct DividendCalculatorView: View {
             Text("尚未添加收息股")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("點擊右上角 + 添加收息持倉")
+            Text("點擊右上角 + 添加收息持倉；股票分頁裡息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的持倉也會自動列入這裡")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)

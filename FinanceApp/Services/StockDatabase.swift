@@ -136,6 +136,16 @@ struct StockDatabase {
     static var highYieldStocks: [StockInfo] {
         allStocks.filter { $0.dividendYield >= 0.04 }
     }
+
+    /// 預設息率查詢表（symbol → 年息率）。
+    /// 實際派息記錄拉不到時才用這份回退值，因此顧問報告與收息計算器共用同一份，避免兩邊各算一套。
+    static let presetYieldBySymbol: [String: Double] = {
+        var table: [String: Double] = [:]
+        for stock in allStocks where stock.dividendYield > 0 {
+            table[stock.symbol] = stock.dividendYield
+        }
+        return table
+    }()
 }
 
 // MARK: - 股票信息結構

@@ -353,6 +353,41 @@ struct DividendPosition: Identifiable, Codable {
     }
 }
 
+// MARK: - 組合中的高息股
+/// 由股票持倉推導而來，不另外儲存。息率達 AdvisorEngine.incomeYieldThreshold 的持倉
+/// 本來就被顧問報告算成收息型資產，收息計算器也要用同一份口徑，
+/// 否則同一筆資產在兩個畫面會有兩個答案。
+struct IncomeHolding: Identifiable {
+    let id: UUID
+    let symbol: String
+    let name: String
+    let shares: Int
+    let currency: Currency
+    /// 計息基數的每股價格：有即時報價用現價，沒有才退回買入價
+    let pricePerShare: Double
+    let annualYield: Double
+    /// 息率是否來自近 12 個月的實際派息記錄；false 表示用了預設值
+    let isLiveYield: Bool
+    /// 計息基數是否為即時報價
+    let isLivePrice: Bool
+
+    var totalInvestment: Double {
+        Double(shares) * pricePerShare
+    }
+
+    var annualDividendIncome: Double {
+        totalInvestment * annualYield
+    }
+
+    var monthlyDividendIncome: Double {
+        annualDividendIncome / 12.0
+    }
+
+    var dailyDividendIncome: Double {
+        annualDividendIncome / 365.0
+    }
+}
+
 // MARK: - 財富快照模型（用於每日結算）
 struct WealthSnapshot: Identifiable, Codable {
     var id: UUID = UUID()

@@ -113,6 +113,15 @@ struct AccountsView: View {
                         color: .green
                     )
                 }
+                if !persistence.dividendPositions.isEmpty {
+                    AssetBreakdownItem(
+                        title: "收息股",
+                        amount: persistence.dividendPositionsValue(in: persistence.baseCurrency),
+                        currency: persistence.baseCurrency,
+                        icon: "percent",
+                        color: .purple
+                    )
+                }
             }
 
             if persistence.totalDepositAnnualInterest > 0 {

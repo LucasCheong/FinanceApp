@@ -605,10 +605,67 @@ final class PersistenceService: ObservableObject {
         interestBearingCashBalance + totalFixedDepositPrincipal
     }
 
-    /// 帳戶總資產（基準幣種）：現金 + 定期 + 組合持倉市值。
-    /// 股票本身就是資產，沒建「投資帳戶」也要計入；建了也只計一次，不會翻倍。
+    /// 帳戶總資產（基準幣種）：現金 + 定期 + 組合持倉市值 + 手動登記的收息股。
+    /// 資產本身就是資產，沒建對應帳戶也要計入；建了也只計一次，不會翻倍。
     var totalAccountAssets: Double {
-        totalCashAccountBalance + totalFixedDepositValue + portfolioMarketValue(in: baseCurrency)
+        totalCashAccountBalance
+            + totalFixedDepositValue
+            + portfolioMarketValue(in: baseCurrency)
+            + dividendPositionsValue(in: baseCurrency)
+    }
+
+    // MARK: - 收息型資產
+
+    /// 手動登記的收息股總值（換算為指定幣種）。
+    /// 以買入價計 —— 這份資料是使用者自己填的，沒有即時報價來源
+    func dividendPositionsValue(in currency: Currency) -> Double {
+        dividendPositions.reduce(0.0) { total, position in
+            total + ExchangeRateProvider.convert(position.totalInvestment, from: position.currency, to: currency)
+        }
+    }
+
+    /// 股票持倉裡息率達門檻的高息股。
+    ///
+    /// 顧問報告本來就把這批算成收息型資產，收息計算器也要看到同一批，
+    /// 使用者才不用把同一隻股票在兩邊各輸入一次。口徑與 AdvisorEngine 一致：
+    /// 息率優先用實際派息記錄，計息基數優先用現價。
+    var incomeHoldings: [IncomeHolding] {
+        guard !holdings.isEmpty else { return [] }
+
+        let service = StockService.shared
+        // 已手動登記為收息股的代碼不再從組合帶入，否則同一隻股票會算兩次
+        let manualSymbols = Set(dividendPositions.map { $0.symbol.uppercased() })
+
+        return holdings.compactMap { holding -> IncomeHolding? in
+            guard !manualSymbols.contains(holding.symbol.uppercased()) else { return nil }
+
+            let liveYield = service.liveDividendYield(for: holding.symbol)
+            let yield = liveYield ?? StockDatabase.presetYieldBySymbol[holding.symbol] ?? 0
+            guard yield >= AdvisorEngine.incomeYieldThreshold else { return nil }
+
+            let livePrice = (service.holdingQuotes[holding.symbol]?.currentPrice
+                ?? service.quotes.first { $0.symbol == holding.symbol }?.currentPrice)
+                .flatMap { $0 > 0 ? $0 : nil }
+
+            return IncomeHolding(
+                id: holding.id,
+                symbol: holding.symbol,
+                name: holding.name,
+                shares: holding.shares,
+                currency: Currency.from(market: holding.market),
+                pricePerShare: livePrice ?? holding.purchasePrice,
+                annualYield: yield,
+                isLiveYield: liveYield != nil,
+                isLivePrice: livePrice != nil
+            )
+        }
+    }
+
+    /// 高息股帶入的年度股息（基準幣種）
+    var incomeHoldingsAnnualIncome: Double {
+        incomeHoldings.reduce(0.0) { total, holding in
+            total + ExchangeRateProvider.convert(holding.annualDividendIncome, from: holding.currency, to: baseCurrency)
+        }
     }
 
     // MARK: - 計算屬性（以基準幣種結算）
