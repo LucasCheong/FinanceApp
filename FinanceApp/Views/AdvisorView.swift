@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 顧問狀態管理
 final class AdvisorStore: ObservableObject {
@@ -129,15 +130,25 @@ final class AdvisorStore: ObservableObject {
                 }
             }
         } else {
+            // 沒有連接模型時改由本機規則引擎回答，答案全部從報告已算好的數字組出來
+            let localReply = LocalAdvisorAnswers.answer(for: trimmed, report: current)
             await MainActor.run {
                 messages.append(AdvisorMessage(
                     role: .advisor,
-                    text: "追問功能需要連接 AI 服務。請到「設定 → AI 顧問」填入 API Key。\n\n在此之前，報告中的評分、體檢與再平衡建議全部由本機引擎計算，不需連網即可使用。"
+                    text: localReply ?? LocalAdvisorAnswers.fallbackText
                 ))
             }
         }
 
         await MainActor.run { isAnswering = false }
+    }
+
+    /// 把在外部 AI 得到的回覆貼回對話
+    @MainActor
+    func appendPastedReply(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        messages.append(AdvisorMessage(role: .advisor, text: trimmed))
     }
 
     /// 取得最新報價（沒有持倉時直接跳過網絡請求）
@@ -788,13 +799,20 @@ struct AdvisorChatView: View {
     @ObservedObject var store: AdvisorStore
     @Environment(\.dismiss) private var dismiss
     @State private var input = ""
+    @State private var copyHint: String?
+    @State private var showingCopyHint = false
 
-    private let suggestions = [
-        "我現在最該做的第一件事是什麼？",
-        "我的持倉集中度會有什麼後果？",
-        "每月結餘該怎麼分配？",
-        "多久應該檢視一次組合？"
-    ]
+    /// 未接模型時列出本機答得出的題目，接了模型就給幾個開放式的
+    private var suggestions: [String] {
+        LLMService.shared.isConfigured
+            ? [
+                "我現在最該做的第一件事是什麼？",
+                "我的持倉集中度會有什麼後果？",
+                "每月結餘該怎麼分配？",
+                "多久應該檢視一次組合？"
+            ]
+            : LocalAdvisorAnswers.suggestedQuestions
+    }
 
     var body: some View {
         NavigationStack {
@@ -858,9 +876,39 @@ struct AdvisorChatView: View {
             .navigationTitle("追問顧問")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button {
+                            copyBriefing()
+                        } label: {
+                            Label("複製問題與財務快照", systemImage: "doc.on.doc")
+                        }
+                        Button {
+                            pasteReply()
+                        } label: {
+                            Label("貼上外部 AI 的回覆", systemImage: "text.badge.plus")
+                        }
+                        if !store.messages.isEmpty {
+                            Divider()
+                            Button(role: .destructive) {
+                                store.messages.removeAll()
+                                Haptics.warning()
+                            } label: {
+                                Label("清空對話", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
                 }
+            }
+            .alert("提示", isPresented: $showingCopyHint) {
+                Button("確定") { }
+            } message: {
+                Text(copyHint ?? "")
             }
         }
     }
@@ -869,7 +917,7 @@ struct AdvisorChatView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(LLMService.shared.isConfigured
                  ? "顧問已讀取你的完整報告，可以直接問。"
-                 : "尚未設定 AI 服務，追問功能無法回答。請到「設定 → AI 顧問」填入 API Key。")
+                 : "未連接 AI 服務，改由本機引擎回答 —— 下面這些題目全部用你自己的數據算出來，不用連網、不用 API Key。問到範圍外的題目，用左上角選單把快照複製到外部 AI。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -914,5 +962,29 @@ struct AdvisorChatView: View {
         input = ""
         Haptics.impact()
         Task { await store.ask(question) }
+    }
+
+    /// 把角色設定、財務快照與問題一起複製，貼到任何 AI 對話就能直接用
+    private func copyBriefing() {
+        guard let report = store.report else {
+            copyHint = "還沒有分析報告，先回上一頁按「開始分析」。"
+            showingCopyHint = true
+            return
+        }
+        UIPasteboard.general.string = LocalAdvisorAnswers.briefing(question: input, report: report)
+        Haptics.success()
+        copyHint = "已複製。貼到電腦或手機上的 AI 對話，把它的回覆複製後，再用選單的「貼上外部 AI 的回覆」存回這裡。"
+        showingCopyHint = true
+    }
+
+    private func pasteReply() {
+        guard let text = UIPasteboard.general.string,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            copyHint = "剪貼板沒有文字內容。"
+            showingCopyHint = true
+            return
+        }
+        store.appendPastedReply(text)
+        Haptics.success()
     }
 }

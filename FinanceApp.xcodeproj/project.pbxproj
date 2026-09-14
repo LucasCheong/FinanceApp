@@ -38,6 +38,7 @@
 		20000000000000000000001F /* AdvisorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* AdvisorModels.swift */; };
 		200000000000000000000020 /* AdvisorEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* AdvisorEngine.swift */; };
 		200000000000000000000021 /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000022 /* LLMService.swift */; };
+		200000000000000000000025 /* LocalAdvisorAnswers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000025 /* LocalAdvisorAnswers.swift */; };
 		200000000000000000000022 /* AdvisorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000023 /* AdvisorView.swift */; };
 		200000000000000000000024 /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000024 /* AccountsView.swift */; };
 /* End PBXBuildFile section */
@@ -101,6 +102,7 @@
 		100000000000000000000020 /* AdvisorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvisorModels.swift; sourceTree = "<group>"; };
 		100000000000000000000021 /* AdvisorEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvisorEngine.swift; sourceTree = "<group>"; };
 		100000000000000000000022 /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
+		100000000000000000000025 /* LocalAdvisorAnswers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAdvisorAnswers.swift; sourceTree = "<group>"; };
 		100000000000000000000023 /* AdvisorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvisorView.swift; sourceTree = "<group>"; };
 		100000000000000000000024 /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -178,6 +180,7 @@
 				100000000000000000000019 /* CloudSyncService.swift */,
 				100000000000000000000021 /* AdvisorEngine.swift */,
 				100000000000000000000022 /* LLMService.swift */,
+				100000000000000000000025 /* LocalAdvisorAnswers.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -346,6 +349,7 @@
 				20000000000000000000001F /* AdvisorModels.swift in Sources */,
 				200000000000000000000020 /* AdvisorEngine.swift in Sources */,
 				200000000000000000000021 /* LLMService.swift in Sources */,
+				200000000000000000000025 /* LocalAdvisorAnswers.swift in Sources */,
 				200000000000000000000022 /* AdvisorView.swift in Sources */,
 				200000000000000000000024 /* AccountsView.swift in Sources */,
 			);
