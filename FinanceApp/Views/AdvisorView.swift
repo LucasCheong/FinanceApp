@@ -48,14 +48,14 @@ final class AdvisorStore: ObservableObject {
 
         let quotes = await latestQuotes()
         let snapshotProfile = profile
-        var newReport = AdvisorEngine.generateReport(
+        let baseReport = AdvisorEngine.generateReport(
             persistence: PersistenceService.shared,
             quotes: quotes,
             profile: snapshotProfile
         )
 
         await MainActor.run {
-            report = newReport
+            report = baseReport
             messages = []
             isGenerating = false
         }
@@ -64,10 +64,12 @@ final class AdvisorStore: ObservableObject {
 
         await MainActor.run { isPolishing = true }
         do {
-            let narrative = try await LLMService.shared.polishReport(newReport)
-            newReport.narrative = narrative
+            let narrative = try await LLMService.shared.polishReport(baseReport)
+            var polished = baseReport
+            polished.narrative = narrative
+            let finalReport = polished
             await MainActor.run {
-                report = newReport
+                report = finalReport
                 isPolishing = false
             }
         } catch {
@@ -80,16 +82,18 @@ final class AdvisorStore: ObservableObject {
 
     /// 僅重新潤飾（報告已存在時）
     func polishAgain() async {
-        guard var current = report, LLMService.shared.isConfigured else { return }
+        guard let current = report, LLMService.shared.isConfigured else { return }
         await MainActor.run {
             isPolishing = true
             errorMessage = nil
         }
         do {
             let narrative = try await LLMService.shared.polishReport(current)
-            current.narrative = narrative
+            var updated = current
+            updated.narrative = narrative
+            let finalReport = updated
             await MainActor.run {
-                report = current
+                report = finalReport
                 isPolishing = false
             }
         } catch {
