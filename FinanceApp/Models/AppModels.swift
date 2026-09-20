@@ -91,6 +91,7 @@ struct Transaction: Identifiable, Codable, Hashable {
     enum TransactionSource: String, Codable {
         case manual = "手動輸入"
         case invoice = "發票導入"
+        case imported = "匯入"
     }
 }
 

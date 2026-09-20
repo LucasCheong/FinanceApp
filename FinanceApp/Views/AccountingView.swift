@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - 記帳主視圖
 struct AccountingView: View {
@@ -10,6 +12,7 @@ struct AccountingView: View {
     @State private var showingAccounts = false
     @State private var showingBudget = false
     @State private var showingExchangeRate = false
+    @State private var showingImport = false
 
     enum TransactionFilter: String, CaseIterable {
         case all = "全部"
@@ -86,6 +89,9 @@ struct AccountingView: View {
                             Button { showingExchangeRate = true } label: {
                                 Label("匯率走勢", systemImage: "chart.line.uptrend.xyaxis")
                             }
+                            Button { showingImport = true } label: {
+                                Label("導入支出 (CSV)", systemImage: "square.and.arrow.down")
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.title2)
@@ -122,6 +128,9 @@ struct AccountingView: View {
             }
             .sheet(isPresented: $showingExchangeRate) {
                 ExchangeRateView()
+            }
+            .sheet(isPresented: $showingImport) {
+                ExpenseImportView()
             }
         }
     }
@@ -507,5 +516,213 @@ struct AddTransactionView: View {
 
         persistence.addTransaction(transaction)
         dismiss()
+    }
+}
+
+// MARK: - 支出 CSV 匯入視圖
+struct ExpenseImportView: View {
+    @StateObject private var persistence = PersistenceService.shared
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showingFilePicker = false
+    @State private var result: ExpenseImportParser.Result?
+    @State private var fileName = ""
+    @State private var accountId: UUID?
+    @State private var errorMessage: String?
+    @State private var showingError = false
+    @State private var showingCopyHint = false
+    @State private var importedCount: Int?
+    @State private var showingImportDone = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                formatSection
+
+                Section {
+                    Button {
+                        showingFilePicker = true
+                    } label: {
+                        Label(fileName.isEmpty ? "選擇 CSV 檔案" : "重新選擇檔案", systemImage: "folder")
+                    }
+                    if !fileName.isEmpty {
+                        HStack {
+                            Text("已選檔案")
+                            Spacer()
+                            Text(fileName).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .font(.caption)
+                    }
+                }
+
+                if let result {
+                    resultSection(result)
+                }
+            }
+            .navigationTitle("導入支出")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("導入") { performImport() }
+                        .disabled((result?.validCount ?? 0) == 0)
+                        .bold()
+                }
+            }
+            .fileImporter(isPresented: $showingFilePicker,
+                          allowedContentTypes: [.commaSeparatedText, .plainText, .text]) { outcome in
+                handlePick(outcome)
+            }
+            .alert("匯入完成", isPresented: $showingImportDone) {
+                Button("完成") { dismiss() }
+            } message: {
+                Text("已匯入 \(importedCount ?? 0) 筆支出記錄。")
+            }
+            .alert("無法讀取檔案", isPresented: $showingError) {
+                Button("確定") { }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+            .alert("已複製範本", isPresented: $showingCopyHint) {
+                Button("確定") { }
+            } message: {
+                Text("範本已複製到剪貼板。貼到 Excel / 記事本，按自己的資料填完，另存為 CSV 後再匯入。")
+            }
+        }
+    }
+
+    // MARK: - 格式說明
+    private var formatSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("欄位順序：日期、金額、幣種、類別、備註（備註可略）")
+                Text("• 日期如 2026-07-01；幣種用代號 HKD / USD / CNY 等")
+                Text("• 第一列可以是標題（中英皆可），也可以直接從資料開始")
+                Text("• Excel / Numbers 請另存為 CSV（建議 CSV UTF-8）")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Button {
+                UIPasteboard.general.string = ExpenseImportParser.templateCSV
+                Haptics.success()
+                showingCopyHint = true
+            } label: {
+                Label("複製 CSV 範本", systemImage: "doc.on.doc")
+            }
+        } header: {
+            Text("檔案格式")
+        } footer: {
+            Text("真正的 .xlsx 無法直接匯入，請在 Excel 用「另存為」選 CSV 格式。")
+        }
+    }
+
+    // MARK: - 解析結果
+    @ViewBuilder
+    private func resultSection(_ result: ExpenseImportParser.Result) -> some View {
+        if let headerError = result.headerError {
+            Section {
+                Label(headerError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } else {
+            if !persistence.transactableAccounts.isEmpty {
+                Section {
+                    Picker("歸屬帳戶", selection: $accountId) {
+                        Text("不指定").tag(UUID?.none)
+                        ForEach(persistence.transactableAccounts) { account in
+                            Text(account.displayName).tag(Optional(account.id))
+                        }
+                    }
+                } footer: {
+                    Text("選定帳戶後，匯入的每筆支出會自動扣減該帳戶餘額。")
+                }
+            }
+
+            Section {
+                HStack {
+                    Label("可匯入", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Spacer()
+                    Text("\(result.validCount) 筆").bold()
+                }
+                if result.invalidCount > 0 {
+                    HStack {
+                        Label("將略過", systemImage: "xmark.circle.fill").foregroundStyle(.orange)
+                        Spacer()
+                        Text("\(result.invalidCount) 筆").bold()
+                    }
+                }
+            } header: {
+                Text("預覽")
+            }
+
+            Section("明細") {
+                ForEach(result.rows) { row in
+                    rowView(row)
+                }
+            }
+        }
+    }
+
+    private func rowView(_ row: ExpenseImportParser.ParsedRow) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: row.isValid ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(row.isValid ? .green : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                if let tx = row.transaction {
+                    Text("\(tx.category) · \(tx.amount.moneyString(currency: tx.currency))")
+                        .font(.subheadline)
+                    Text(tx.date.shortDateString)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(row.summary)
+                        .font(.subheadline)
+                    Text("第 \(row.lineNumber) 列：\(row.errorReason ?? "")")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    // MARK: - 行為
+    private func handlePick(_ outcome: Result<URL, Error>) {
+        switch outcome {
+        case .success(let url):
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                guard let text = ExpenseImportParser.decode(data) else {
+                    errorMessage = "檔案編碼無法識別。請在 Excel 另存為「CSV UTF-8」後重試。"
+                    showingError = true
+                    return
+                }
+                fileName = url.lastPathComponent
+                result = ExpenseImportParser.parse(text, defaultCurrency: persistence.baseCurrency)
+            } catch {
+                errorMessage = error.localizedDescription
+                showingError = true
+            }
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+            showingError = true
+        }
+    }
+
+    private func performImport() {
+        guard let result, result.validCount > 0 else { return }
+        let transactions = result.validTransactions.map { tx -> Transaction in
+            var copy = tx
+            copy.accountId = accountId
+            return copy
+        }
+        persistence.addTransactions(transactions)
+        importedCount = transactions.count
+        showingImportDone = true
     }
 }

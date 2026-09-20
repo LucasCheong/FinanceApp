@@ -340,6 +340,15 @@ final class PersistenceService: ObservableObject {
         updateWidgetSnapshot()
     }
 
+    /// 批次新增交易（CSV 匯入用）：一次存檔、一次更新小組件，避免逐筆 I/O
+    func addTransactions(_ newOnes: [Transaction]) {
+        guard !newOnes.isEmpty else { return }
+        transactions.insert(contentsOf: newOnes, at: 0)
+        saveTransactions()
+        Haptics.success()
+        updateWidgetSnapshot()
+    }
+
     func deleteTransaction(at indexSet: IndexSet) {
         transactions.remove(atOffsets: indexSet)
         saveTransactions()
@@ -959,5 +968,302 @@ final class PersistenceService: ObservableObject {
             print("載入數據失敗: \(error.localizedDescription)")
             return nil
         }
+    }
+}
+
+// MARK: - 支出 CSV 匯入
+
+/// CSV 匯入解析器。Excel / Numbers / Google Sheets 都可「另存為 CSV」後匯入。
+///
+/// 認得本 App 自己匯出的 CSV 標題（日期,類型,類別,金額,幣種,備註,來源），
+/// 也支援自訂標題列（中英皆可）。逐列驗證，壞列不擋整份，並回報原因。
+enum ExpenseImportParser {
+
+    /// 已解析的一列：成功則 transaction 有值，失敗則 errorReason 有值
+    struct ParsedRow: Identifiable {
+        let id = UUID()
+        /// 對應原始檔的行號（含標題列，從 1 起），方便使用者回檔案對照
+        let lineNumber: Int
+        let summary: String
+        var transaction: Transaction?
+        var errorReason: String?
+        var isValid: Bool { transaction != nil }
+    }
+
+    struct Result {
+        var rows: [ParsedRow]
+        /// 標題列缺少必要欄位等全檔問題；非 nil 時 rows 為空
+        var headerError: String?
+        var validRows: [ParsedRow] { rows.filter { $0.isValid } }
+        var invalidRows: [ParsedRow] { rows.filter { !$0.isValid } }
+        var validCount: Int { validRows.count }
+        var invalidCount: Int { invalidRows.count }
+        var validTransactions: [Transaction] { rows.compactMap { $0.transaction } }
+    }
+
+    /// 可貼到 Excel / 記事本的範本內容
+    static let templateCSV = """
+    日期,金額,幣種,類別,備註
+    2026-07-01,88.5,HKD,餐飲,午餐
+    2026-07-02,1200,HKD,住房,水電費
+    2026-07-03,45,TWD,交通,捷運
+    """
+
+    // MARK: 公開入口
+
+    /// 以多種編碼嘗試解碼：優先 UTF-8，再退回 Big5 / GB18030 ——
+    /// Windows 版 Excel 另存 CSV 常用 ANSI（繁中為 Big5），直接當 UTF-8 讀會亂碼
+    static func decode(_ data: Data) -> String? {
+        let big5 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.big5.rawValue)))
+        let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        let candidates: [String.Encoding] = [.utf8, big5, gb18030, .isoLatin1]
+        for enc in candidates {
+            if let text = String(data: data, encoding: enc) {
+                // 去除 UTF-8 BOM（Excel 「CSV UTF-8」會加）
+                return text.replacingOccurrences(of: "\u{FEFF}", with: "")
+            }
+        }
+        return nil
+    }
+
+    static func parse(_ text: String,
+                      defaultCurrency: Currency,
+                      defaultType: Transaction.TransactionType = .expense) -> Result {
+        let records = tokenize(text)
+        guard !records.isEmpty else {
+            return Result(rows: [], headerError: "檔案是空的，沒有可匯入的內容。")
+        }
+
+        // 判斷第一列是不是標題：含任一已知欄位關鍵字就當標題
+        let firstRow = records[0]
+        let hasHeader = firstRow.contains { cell in ColumnKind.detect(cell) != nil }
+
+        let mapping: ColumnMapping
+        let dataRecords: ArraySlice<[String]>
+        let lineOffset: Int
+        if hasHeader {
+            mapping = ColumnMapping(header: firstRow)
+            dataRecords = records.dropFirst()
+            lineOffset = 2
+            if let missing = mapping.missingRequired {
+                return Result(rows: [], headerError: "標題列缺少必要欄位：\(missing)。請確保第一列包含日期、金額、幣種、類別。")
+            }
+        } else {
+            // 無標題：依使用者需求的固定順序日期,金額,幣種,類別,[備註]
+            mapping = ColumnMapping.fixedOrder
+            dataRecords = records[...]
+            lineOffset = 1
+        }
+
+        var rows: [ParsedRow] = []
+        for (index, record) in dataRecords.enumerated() {
+            let lineNumber = index + lineOffset
+            // 略過完全空白的行（Excel 尾部常留空列）
+            if record.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) { continue }
+            rows.append(makeRow(record, lineNumber: lineNumber, mapping: mapping,
+                                defaultCurrency: defaultCurrency, defaultType: defaultType))
+        }
+        return Result(rows: rows, headerError: nil)
+    }
+
+    // MARK: 單列解析
+
+    private static func makeRow(_ record: [String],
+                                lineNumber: Int,
+                                mapping: ColumnMapping,
+                                defaultCurrency: Currency,
+                                defaultType: Transaction.TransactionType) -> ParsedRow {
+        func field(_ kind: ColumnKind) -> String {
+            guard let idx = mapping.index(of: kind), idx < record.count else { return "" }
+            return record[idx].trimmingCharacters(in: .whitespaces)
+        }
+
+        let dateStr = field(.date)
+        let amountStr = field(.amount)
+        let currencyStr = field(.currency)
+        let categoryStr = field(.category)
+        let noteStr = field(.note)
+        let typeStr = field(.type)
+
+        let raw = [dateStr, amountStr, currencyStr, categoryStr].filter { !$0.isEmpty }.joined(separator: "  ·  ")
+
+        func fail(_ reason: String) -> ParsedRow {
+            ParsedRow(lineNumber: lineNumber, summary: raw.isEmpty ? "（空列）" : raw,
+                      transaction: nil, errorReason: reason)
+        }
+
+        guard let date = parseDate(dateStr) else {
+            return fail(dateStr.isEmpty ? "缺少日期" : "日期格式無法解析：\(dateStr)")
+        }
+        guard let amount = parseAmount(amountStr), amount > 0 else {
+            return fail(amountStr.isEmpty ? "缺少金額" : "金額無法解析：\(amountStr)")
+        }
+
+        let currency: Currency
+        if currencyStr.isEmpty {
+            currency = defaultCurrency
+        } else if let parsed = Currency(rawValue: currencyStr.uppercased()) {
+            currency = parsed
+        } else {
+            return fail("幣種無法識別：\(currencyStr)（需為 HKD / USD / CNY 等代號）")
+        }
+
+        let type: Transaction.TransactionType
+        if typeStr.isEmpty {
+            type = defaultType
+        } else if typeStr.contains("收") || typeStr.lowercased().contains("income") {
+            type = .income
+        } else {
+            type = .expense
+        }
+
+        let category = categoryStr.isEmpty ? "其他" : categoryStr
+
+        let transaction = Transaction(
+            date: date,
+            amount: amount,
+            type: type,
+            category: category,
+            note: noteStr,
+            source: .imported,
+            currency: currency,
+            accountId: nil
+        )
+        return ParsedRow(lineNumber: lineNumber, summary: raw, transaction: transaction, errorReason: nil)
+    }
+
+    // MARK: 欄位對應
+
+    private enum ColumnKind: CaseIterable {
+        case date, amount, currency, category, note, type
+
+        /// 每種欄位的標題關鍵字（包含即命中，中英簡繁皆可）
+        var keywords: [String] {
+            switch self {
+            case .date: return ["日期", "時間", "date", "time"]
+            case .amount: return ["金額", "amount", "支出", "報酬"]
+            case .currency: return ["幣種", "币种", "貨幣", "currency"]
+            case .category: return ["類別", "类别", "分類", "分类", "category"]
+            case .note: return ["備註", "备注", "說明", "note", "remark", "memo"]
+            case .type: return ["類型", "类型", "type"]
+            }
+        }
+
+        static func detect(_ cell: String) -> ColumnKind? {
+            let lower = cell.lowercased().trimmingCharacters(in: .whitespaces)
+            guard !lower.isEmpty else { return nil }
+            // 金額優先於類型/類別等，避免「金額」被別的關鍵字誤抳
+            for kind in [ColumnKind.date, .amount, .currency, .category, .type, .note] {
+                if kind.keywords.contains(where: { lower.contains($0) }) { return kind }
+            }
+            return nil
+        }
+    }
+
+    private struct ColumnMapping {
+        private var indices: [ColumnKind: Int] = [:]
+
+        init(header: [String]) {
+            for (i, cell) in header.enumerated() {
+                if let kind = ColumnKind.detect(cell), indices[kind] == nil {
+                    indices[kind] = i
+                }
+            }
+        }
+
+        private init(fixed: [ColumnKind: Int]) { indices = fixed }
+
+        /// 無標題時的固定順序：日期,金額,幣種,類別,備註
+        static let fixedOrder = ColumnMapping(fixed: [.date: 0, .amount: 1, .currency: 2, .category: 3, .note: 4])
+
+        func index(of kind: ColumnKind) -> Int? { indices[kind] }
+
+        /// 回報缺少的必要欄位（供標題錯誤提示）
+        var missingRequired: String? {
+            let required: [(ColumnKind, String)] = [(.date, "日期"), (.amount, "金額"), (.currency, "幣種"), (.category, "類別")]
+            let missing = required.filter { indices[$0.0] == nil }.map { $0.1 }
+            return missing.isEmpty ? nil : missing.joined(separator: "、")
+        }
+    }
+
+    // MARK: 欄位值解析
+
+    private static let dateFormatters: [DateFormatter] = {
+        let patterns = [
+            "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd",
+            "yyyy/MM/dd HH:mm:ss", "yyyy/MM/dd HH:mm", "yyyy/MM/dd",
+            "yyyy.MM.dd", "yyyy年MM月dd日", "MM/dd/yyyy", "dd/MM/yyyy"
+        ]
+        return patterns.map { pattern in
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = .current
+            f.dateFormat = pattern
+            return f
+        }
+    }()
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    static func parseDate(_ raw: String) -> Date? {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty else { return nil }
+        if let d = isoFormatter.date(from: s) { return d }
+        for f in dateFormatters {
+            if let d = f.date(from: s) { return d }
+        }
+        return nil
+    }
+
+    static func parseAmount(_ raw: String) -> Double? {
+        // 去除貨幣符號、千位逗號、空白，只留數字、小數點、負號
+        let allowed = Set("0123456789.-")
+        let cleaned = String(raw.filter { allowed.contains($0) })
+        guard !cleaned.isEmpty, let value = Double(cleaned), value.isFinite else { return nil }
+        return abs(value)
+    }
+
+    // MARK: CSV 分詞（支援引號包围、引號內逗號與雙引號轉義）
+
+    private static func tokenize(_ text: String) -> [[String]] {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var records: [[String]] = []
+        var record: [String] = []
+        var field = ""
+        var inQuotes = false
+        var iterator = normalized.makeIterator()
+        var pending: Character? = nil
+        while true {
+            let ch: Character
+            if let p = pending { ch = p; pending = nil }
+            else if let next = iterator.next() { ch = next }
+            else { break }
+
+            if inQuotes {
+                if ch == "\"" {
+                    if let next = iterator.next() {
+                        if next == "\"" { field.append("\"") }
+                        else { inQuotes = false; pending = next }
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field.append(ch)
+                }
+            } else {
+                switch ch {
+                case "\"": inQuotes = true
+                case ",": record.append(field); field = ""
+                case "\n": record.append(field); field = ""; records.append(record); record = []
+                default: field.append(ch)
+                }
+            }
+        }
+        // 最後一欄／最後一列（檔尾無換行時）
+        record.append(field)
+        records.append(record)
+        return records
     }
 }
