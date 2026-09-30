@@ -90,7 +90,7 @@ struct AccountingView: View {
                                 Label("匯率走勢", systemImage: "chart.line.uptrend.xyaxis")
                             }
                             Button { showingImport = true } label: {
-                                Label("導入支出 (CSV)", systemImage: "square.and.arrow.down")
+                                Label("導入支出 (CSV / XLSX)", systemImage: "square.and.arrow.down")
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
@@ -519,10 +519,12 @@ struct AddTransactionView: View {
     }
 }
 
-// MARK: - 支出 CSV 匯入視圖
+// MARK: - 支出 CSV / XLSX 匯入視圖
 struct ExpenseImportView: View {
     @StateObject private var persistence = PersistenceService.shared
     @Environment(\.dismiss) private var dismiss
+
+    private static let xlsxType = UTType(filenameExtension: "xlsx") ?? .data
 
     @State private var showingFilePicker = false
     @State private var result: ExpenseImportParser.Result?
@@ -543,7 +545,7 @@ struct ExpenseImportView: View {
                     Button {
                         showingFilePicker = true
                     } label: {
-                        Label(fileName.isEmpty ? "選擇 CSV 檔案" : "重新選擇檔案", systemImage: "folder")
+                        Label(fileName.isEmpty ? "選擇 CSV 或 XLSX 檔案" : "重新選擇檔案", systemImage: "folder")
                     }
                     if !fileName.isEmpty {
                         HStack {
@@ -572,7 +574,7 @@ struct ExpenseImportView: View {
                 }
             }
             .fileImporter(isPresented: $showingFilePicker,
-                          allowedContentTypes: [.commaSeparatedText, .plainText, .text]) { outcome in
+                          allowedContentTypes: [.commaSeparatedText, Self.xlsxType]) { outcome in
                 handlePick(outcome)
             }
             .alert("匯入完成", isPresented: $showingImportDone) {
@@ -588,7 +590,7 @@ struct ExpenseImportView: View {
             .alert("已複製範本", isPresented: $showingCopyHint) {
                 Button("確定") { }
             } message: {
-                Text("範本已複製到剪貼板。貼到 Excel / 記事本，按自己的資料填完，另存為 CSV 後再匯入。")
+                Text("範本已複製到剪貼板。貼到 Excel / Numbers，按自己的資料填完，可直接儲存為 XLSX 或另存為 CSV 後匯入。")
             }
         }
     }
@@ -600,7 +602,7 @@ struct ExpenseImportView: View {
                 Text("欄位順序：日期、金額、幣種、類別、備註（備註可略）")
                 Text("• 日期如 2026-07-01；幣種用代號 HKD / USD / CNY 等")
                 Text("• 第一列可以是標題（中英皆可），也可以直接從資料開始")
-                Text("• Excel / Numbers 請另存為 CSV（建議 CSV UTF-8）")
+                Text("• 支援原生 Excel XLSX，也支援 CSV（建議 CSV UTF-8）")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -615,7 +617,7 @@ struct ExpenseImportView: View {
         } header: {
             Text("檔案格式")
         } footer: {
-            Text("真正的 .xlsx 無法直接匯入，請在 Excel 用「另存為」選 CSV 格式。")
+            Text("XLSX 會讀取第一個含資料的工作表；舊式 .xls 不支援，請另存為 .xlsx 或 CSV。")
         }
     }
 
@@ -696,14 +698,21 @@ struct ExpenseImportView: View {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             do {
-                let data = try Data(contentsOf: url)
-                guard let text = ExpenseImportParser.decode(data) else {
-                    errorMessage = "檔案編碼無法識別。請在 Excel 另存為「CSV UTF-8」後重試。"
-                    showingError = true
-                    return
-                }
                 fileName = url.lastPathComponent
-                result = ExpenseImportParser.parse(text, defaultCurrency: persistence.baseCurrency)
+                if url.pathExtension.lowercased() == "xlsx" {
+                    result = try ExpenseImportParser.parseXLSX(
+                        at: url,
+                        defaultCurrency: persistence.baseCurrency
+                    )
+                } else {
+                    let data = try Data(contentsOf: url)
+                    guard let text = ExpenseImportParser.decode(data) else {
+                        errorMessage = "檔案編碼無法識別。請在 Excel 另存為「CSV UTF-8」後重試。"
+                        showingError = true
+                        return
+                    }
+                    result = ExpenseImportParser.parse(text, defaultCurrency: persistence.baseCurrency)
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 showingError = true

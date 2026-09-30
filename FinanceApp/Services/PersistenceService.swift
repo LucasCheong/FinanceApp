@@ -1,4 +1,5 @@
 import Foundation
+import CoreXLSX
 
 /// 數據持久化服務 - 使用 JSON 文件存儲所有應用數據
 final class PersistenceService: ObservableObject {
@@ -340,7 +341,7 @@ final class PersistenceService: ObservableObject {
         updateWidgetSnapshot()
     }
 
-    /// 批次新增交易（CSV 匯入用）：一次存檔、一次更新小組件，避免逐筆 I/O
+    /// 批次新增交易（CSV / XLSX 匯入用）：一次存檔、一次更新小組件，避免逐筆 I/O
     func addTransactions(_ newOnes: [Transaction]) {
         guard !newOnes.isEmpty else { return }
         transactions.insert(contentsOf: newOnes, at: 0)
@@ -971,9 +972,9 @@ final class PersistenceService: ObservableObject {
     }
 }
 
-// MARK: - 支出 CSV 匯入
+// MARK: - 支出表格匯入
 
-/// CSV 匯入解析器。Excel / Numbers / Google Sheets 都可「另存為 CSV」後匯入。
+/// CSV / XLSX 匯入解析器。
 ///
 /// 認得本 App 自己匯出的 CSV 標題（日期,類型,類別,金額,幣種,備註,來源），
 /// 也支援自訂標題列（中英皆可）。逐列驗證，壞列不擋整份，並回報原因。
@@ -1029,7 +1030,49 @@ enum ExpenseImportParser {
     static func parse(_ text: String,
                       defaultCurrency: Currency,
                       defaultType: Transaction.TransactionType = .expense) -> Result {
-        let records = tokenize(text)
+        parseRecords(tokenize(text), defaultCurrency: defaultCurrency, defaultType: defaultType)
+    }
+
+    /// 直接解析真正的 Excel .xlsx 檔案。讀取第一個含資料的工作表，
+    /// 再交給與 CSV 共用的欄位對應與逐列驗證流程，確保兩種格式結果一致。
+    static func parseXLSX(at url: URL,
+                          defaultCurrency: Currency,
+                          defaultType: Transaction.TransactionType = .expense) throws -> Result {
+        guard let file = XLSXFile(filepath: url.path) else {
+            throw importError("XLSX 檔案損壞、已加密或無法開啟。")
+        }
+
+        let sharedStrings = try file.parseSharedStrings()
+        for workbook in try file.parseWorkbooks() {
+            for (_, path) in try file.parseWorksheetPathsAndNames(workbook: workbook) {
+                let worksheet = try file.parseWorksheet(at: path)
+                guard let sheetRows = worksheet.data?.rows, !sheetRows.isEmpty else { continue }
+
+                let records: [[String]] = sheetRows.map { row in
+                    let cells = row.cells
+                    guard let maxColumn = cells.map({ columnIndex($0.reference.column.value) }).max(), maxColumn >= 0 else {
+                        return []
+                    }
+                    var values = Array(repeating: "", count: maxColumn + 1)
+                    for cell in cells {
+                        let index = columnIndex(cell.reference.column.value)
+                        guard index >= 0, index < values.count else { continue }
+                        values[index] = cellText(cell, sharedStrings: sharedStrings)
+                    }
+                    return values
+                }
+
+                if records.contains(where: { !$0.allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty } }) {
+                    return parseRecords(records, defaultCurrency: defaultCurrency, defaultType: defaultType)
+                }
+            }
+        }
+        return Result(rows: [], headerError: "XLSX 檔案沒有可匯入的工作表或資料。")
+    }
+
+    private static func parseRecords(_ records: [[String]],
+                                     defaultCurrency: Currency,
+                                     defaultType: Transaction.TransactionType) -> Result {
         guard !records.isEmpty else {
             return Result(rows: [], headerError: "檔案是空的，沒有可匯入的內容。")
         }
@@ -1064,6 +1107,24 @@ enum ExpenseImportParser {
                                 defaultCurrency: defaultCurrency, defaultType: defaultType))
         }
         return Result(rows: rows, headerError: nil)
+    }
+
+    private static func cellText(_ cell: Cell, sharedStrings: SharedStrings?) -> String {
+        if let sharedStrings, let text = cell.stringValue(sharedStrings) { return text }
+        if let inline = cell.inlineString?.text { return inline }
+        return cell.value ?? ""
+    }
+
+    /// A → 0、B → 1、AA → 26。XLSX 的稀疏列會省略空儲存格，必須依欄名補回位置。
+    private static func columnIndex(_ letters: String) -> Int {
+        letters.uppercased().unicodeScalars.reduce(0) { value, scalar in
+            value * 26 + Int(scalar.value - 64)
+        } - 1
+    }
+
+    private static func importError(_ message: String) -> NSError {
+        NSError(domain: "FinanceApp.XLSXImport", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     // MARK: 單列解析
@@ -1211,6 +1272,11 @@ enum ExpenseImportParser {
         if let d = isoFormatter.date(from: s) { return d }
         for f in dateFormatters {
             if let d = f.date(from: s) { return d }
+        }
+        // Excel 常把日期存成 1899-12-30 起算的序號，小數部分代表時間。
+        if let serial = Double(s), serial >= 1, serial < 2_958_466,
+           let epoch = Calendar(identifier: .gregorian).date(from: DateComponents(year: 1899, month: 12, day: 30)) {
+            return epoch.addingTimeInterval(serial * 86_400)
         }
         return nil
     }

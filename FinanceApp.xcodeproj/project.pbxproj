@@ -41,6 +41,7 @@
 		200000000000000000000025 /* LocalAdvisorAnswers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000025 /* LocalAdvisorAnswers.swift */; };
 		200000000000000000000022 /* AdvisorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000023 /* AdvisorView.swift */; };
 		200000000000000000000024 /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000024 /* AccountsView.swift */; };
+		300000000000000000000001 /* CoreXLSX in Frameworks */ = {isa = PBXBuildFile; productRef = 500000000000000000000001 /* CoreXLSX */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,6 +113,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				300000000000000000000001 /* CoreXLSX in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,6 +244,9 @@
 				000000000000000000000027 /* PBXTargetDependency */,
 			);
 			name = FinanceApp;
+			packageProductDependencies = (
+				500000000000000000000001 /* CoreXLSX */,
+			);
 			productName = FinanceApp;
 			productReference = 100000000000000000000010 /* FinanceApp.app */;
 			productType = "com.apple.product-type.application";
@@ -290,6 +295,9 @@
 				Base,
 			);
 			mainGroup = 000000000000000000000002 /* = Root */;
+			packageReferences = (
+				400000000000000000000001 /* XCRemoteSwiftPackageReference "CoreXLSX" */,
+			);
 			productRefGroup = 000000000000000000000008 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -374,6 +382,25 @@
 			targetProxy = 000000000000000000000020 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		400000000000000000000001 /* XCRemoteSwiftPackageReference "CoreXLSX" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CoreOffice/CoreXLSX.git";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.14.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		500000000000000000000001 /* CoreXLSX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 400000000000000000000001 /* XCRemoteSwiftPackageReference "CoreXLSX" */;
+			productName = CoreXLSX;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		00000000000000000000000E /* Debug */ = {
