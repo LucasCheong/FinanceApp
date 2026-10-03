@@ -374,11 +374,14 @@ final class PersistenceService: ObservableObject {
 
     /// 新增持倉。若已有同一支股票，自動將批次併入現有持倉而非另開一筆
     func addHolding(_ holding: StockHolding) {
-        if let index = holdings.firstIndex(where: { $0.symbol.uppercased() == holding.symbol.uppercased() }) {
-            holdings[index].lots.append(contentsOf: holding.lots)
+        var updated = holdings
+        if let index = updated.firstIndex(where: { $0.symbol.uppercased() == holding.symbol.uppercased() }) {
+            updated[index].lots.append(contentsOf: holding.lots)
         } else {
-            holdings.append(holding)
+            updated.append(holding)
         }
+        // 整個陣列重新賦值，確保 @Published 在修改巢狀 lots 時也穩定通知所有頁面
+        holdings = updated
         saveHoldings()
     }
 
@@ -396,11 +399,13 @@ final class PersistenceService: ObservableObject {
 
     /// 刪除持倉中的單一批次。若刪後無批次殘留則整筆刪除
     func deleteLot(_ lot: StockHolding.Lot, from holdingId: UUID) {
-        guard let index = holdings.firstIndex(where: { $0.id == holdingId }) else { return }
-        holdings[index].lots.removeAll { $0.id == lot.id }
-        if holdings[index].lots.isEmpty {
-            holdings.remove(at: index)
+        var updated = holdings
+        guard let index = updated.firstIndex(where: { $0.id == holdingId }) else { return }
+        updated[index].lots.removeAll { $0.id == lot.id }
+        if updated[index].lots.isEmpty {
+            updated.remove(at: index)
         }
+        holdings = updated
         saveHoldings()
         Haptics.warning()
     }
@@ -431,8 +436,17 @@ final class PersistenceService: ObservableObject {
     }
 
     // MARK: - 收息股
+    /// 同一股票只保留一筆手動收息設定；再次保存視為更新，避免重複計息
     func addDividendPosition(_ position: DividendPosition) {
-        dividendPositions.append(position)
+        var updated = dividendPositions
+        if let index = updated.firstIndex(where: { $0.symbol.uppercased() == position.symbol.uppercased() }) {
+            var replacement = position
+            replacement.id = updated[index].id
+            updated[index] = replacement
+        } else {
+            updated.append(position)
+        }
+        dividendPositions = updated
         saveDividends()
     }
 
@@ -467,8 +481,11 @@ final class PersistenceService: ObservableObject {
     }
 
     func updateAccount(_ account: Account) {
-        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
-        accounts[index] = account
+        var updated = accounts
+        guard let index = updated.firstIndex(where: { $0.id == account.id }) else { return }
+        updated[index] = account
+        // 明確重新賦值，確保收息頁立即收到帳戶餘額／利率更新
+        accounts = updated
         saveAccounts()
     }
 
@@ -528,12 +545,14 @@ final class PersistenceService: ObservableObject {
 
     /// 把所有未歸屬的交易一次歸入指定帳戶
     func assignUnassignedTransactions(to accountId: UUID) {
+        var updated = transactions
         var touched = false
-        for index in transactions.indices where transactions[index].accountId == nil {
-            transactions[index].accountId = accountId
+        for index in updated.indices where updated[index].accountId == nil {
+            updated[index].accountId = accountId
             touched = true
         }
         if touched {
+            transactions = updated
             saveTransactions()
             Haptics.success()
         }
@@ -643,32 +662,40 @@ final class PersistenceService: ObservableObject {
 
     // MARK: - 收息型資產
 
-    /// 手動登記的收息股總值（換算為指定幣種）。
+    /// 沒有對應組合持倉的手動收息股。若同一代碼已在組合中，股數與成本以組合為準，避免重複計算
+    var standaloneDividendPositions: [DividendPosition] {
+        let holdingSymbols = Set(holdings.map { $0.symbol.uppercased() })
+        return dividendPositions.filter { !holdingSymbols.contains($0.symbol.uppercased()) }
+    }
+
+    /// 手動登記且不在組合中的收息股總值（換算為指定幣種）。
     /// 以買入價計 —— 這份資料是使用者自己填的，沒有即時報價來源
     func dividendPositionsValue(in currency: Currency) -> Double {
-        dividendPositions.reduce(0.0) { total, position in
+        standaloneDividendPositions.reduce(0.0) { total, position in
             total + ExchangeRateProvider.convert(position.totalInvestment, from: position.currency, to: currency)
         }
     }
 
-    /// 股票持倉裡息率達門檻的高息股。
-    ///
-    /// 顧問報告本來就把這批算成收息型資產，收息計算器也要看到同一批，
-    /// 使用者才不用把同一隻股票在兩邊各輸入一次。口徑與 AdvisorEngine 一致：
-    /// 息率優先用實際派息記錄，計息基數優先用現價。
+    /// 組合中的收息股。真實息率達門檻，或曾手動登記為收息股，皆會納入。
+    /// 同一代碼同時存在於組合與手動收息記錄時，股數與成本以組合最新資料為準，
+    /// 息率則依序採用實際派息、手動輸入、資料庫預設值，避免更新持倉後仍顯示舊股數。
     var incomeHoldings: [IncomeHolding] {
         guard !holdings.isEmpty else { return [] }
 
         let service = StockService.shared
-        // 已手動登記為收息股的代碼不再從組合帶入，否則同一隻股票會算兩次
-        let manualSymbols = Set(dividendPositions.map { $0.symbol.uppercased() })
+        var manualBySymbol: [String: DividendPosition] = [:]
+        for position in dividendPositions {
+            manualBySymbol[position.symbol.uppercased()] = position
+        }
 
         return holdings.compactMap { holding -> IncomeHolding? in
-            guard !manualSymbols.contains(holding.symbol.uppercased()) else { return nil }
-
+            let manual = manualBySymbol[holding.symbol.uppercased()]
             let liveYield = service.liveDividendYield(for: holding.symbol)
-            let yield = liveYield ?? StockDatabase.presetYieldBySymbol[holding.symbol] ?? 0
-            guard yield >= AdvisorEngine.incomeYieldThreshold else { return nil }
+            let yield = liveYield
+                ?? manual?.annualYield
+                ?? StockDatabase.presetYieldBySymbol[holding.symbol]
+                ?? 0
+            guard manual != nil || yield >= AdvisorEngine.incomeYieldThreshold else { return nil }
 
             let livePrice = (service.holdingQuotes[holding.symbol]?.currentPrice
                 ?? service.quotes.first { $0.symbol == holding.symbol }?.currentPrice)

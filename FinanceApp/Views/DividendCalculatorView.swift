@@ -8,8 +8,11 @@ struct DividendCalculatorView: View {
     @State private var showingAddPosition = false
     @State private var isRefreshing = false
 
-    /// 從股票組合自動帶入的高息股（息率達門檻者）
+    /// 從股票組合自動帶入的收息股
     var incomeHoldings: [IncomeHolding] { persistence.incomeHoldings }
+
+    /// 不在股票組合中的手動收息股；同代碼持倉以組合最新股數與成本為準
+    var manualDividendPositions: [DividendPosition] { persistence.standaloneDividendPositions }
 
     private func inBase(_ amount: Double, _ currency: Currency) -> Double {
         ExchangeRateProvider.convert(amount, from: currency, to: persistence.baseCurrency)
@@ -17,22 +20,22 @@ struct DividendCalculatorView: View {
 
     // 股息部分（以基準幣種結算）：手動登記的收息股 + 組合中的高息股
     var dividendDailyIncome: Double {
-        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.dailyDividendIncome, $1.currency) }
+        manualDividendPositions.reduce(0.0) { $0 + inBase($1.dailyDividendIncome, $1.currency) }
             + incomeHoldings.reduce(0.0) { $0 + inBase($1.dailyDividendIncome, $1.currency) }
     }
 
     var dividendMonthlyIncome: Double {
-        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.monthlyDividendIncome, $1.currency) }
+        manualDividendPositions.reduce(0.0) { $0 + inBase($1.monthlyDividendIncome, $1.currency) }
             + incomeHoldings.reduce(0.0) { $0 + inBase($1.monthlyDividendIncome, $1.currency) }
     }
 
     var dividendAnnualIncome: Double {
-        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.annualDividendIncome, $1.currency) }
+        manualDividendPositions.reduce(0.0) { $0 + inBase($1.annualDividendIncome, $1.currency) }
             + incomeHoldings.reduce(0.0) { $0 + inBase($1.annualDividendIncome, $1.currency) }
     }
 
     var dividendInvestment: Double {
-        persistence.dividendPositions.reduce(0.0) { $0 + inBase($1.totalInvestment, $1.currency) }
+        manualDividendPositions.reduce(0.0) { $0 + inBase($1.totalInvestment, $1.currency) }
             + incomeHoldings.reduce(0.0) { $0 + inBase($1.totalInvestment, $1.currency) }
     }
 
@@ -82,7 +85,7 @@ struct DividendCalculatorView: View {
                     }
 
                     // 收息持倉列表
-                    if persistence.dividendPositions.isEmpty && incomeHoldings.isEmpty {
+                    if manualDividendPositions.isEmpty && incomeHoldings.isEmpty {
                         if !hasDepositInterest {
                             emptyState
                         }
@@ -139,11 +142,17 @@ struct DividendCalculatorView: View {
     private func refreshData(force: Bool) async {
         guard !isRefreshing else { return }
         let holdings = persistence.holdings
-        guard !holdings.isEmpty else { return }
+        guard force || !holdings.isEmpty else { return }
 
         isRefreshing = true
         defer { isRefreshing = false }
 
+        // 手動刷新也更新匯率，現金／定期帳戶的跨幣種利息會立即重算
+        if force {
+            await ExchangeRateProvider.fetchLiveRates(force: true)
+        }
+
+        guard !holdings.isEmpty else { return }
         let symbols = holdings.map(\.symbol)
         await stockService.refreshHoldingQuotes(for: holdings)
         await stockService.refreshDividendYields(
@@ -343,8 +352,8 @@ struct DividendCalculatorView: View {
     /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
     private var positionsList: some View {
         VStack(spacing: 8) {
-            if !persistence.dividendPositions.isEmpty {
-                ForEach(persistence.dividendPositions) { position in
+            if !manualDividendPositions.isEmpty {
+                ForEach(manualDividendPositions) { position in
                     DividendPositionRow(position: position)
                         .contextMenu {
                             Button(role: .destructive) {
@@ -372,7 +381,7 @@ struct DividendCalculatorView: View {
     private var incomeHoldingsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("組合中的高息股", systemImage: "chart.line.uptrend.xyaxis")
+                Label("組合中的收息股", systemImage: "chart.line.uptrend.xyaxis")
                     .font(.headline)
                 Spacer()
                 Text(incomeHoldingsAnnual.moneyString(currency: persistence.baseCurrency) + " / 年")
@@ -382,9 +391,18 @@ struct DividendCalculatorView: View {
 
             ForEach(incomeHoldings) { holding in
                 incomeHoldingRow(holding)
+                    .contextMenu {
+                        if let manual = linkedManualPosition(for: holding.symbol) {
+                            Button(role: .destructive) {
+                                persistence.deleteDividendPosition(manual)
+                            } label: {
+                                Label("移除手動收息設定", systemImage: "trash")
+                            }
+                        }
+                    }
             }
 
-            Text("股票分頁中息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的持倉會自動計入被動收入，不用在這裡重複添加。已手動添加過的代碼不會重複計算。")
+            Text("股票分頁中息率達 \(AdvisorEngine.percentText(AdvisorEngine.incomeYieldThreshold)) 以上的持倉會自動計入。若同一代碼也有手動收息記錄，股數與成本會以股票分頁的最新持倉為準，不會重複計算。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -392,7 +410,11 @@ struct DividendCalculatorView: View {
         .cardStyle()
     }
 
-    /// 高息股一行：息率、股數與計息基數、年息。數據不完整時直接說明，不讓使用者誤以為那是實測值
+    private func linkedManualPosition(for symbol: String) -> DividendPosition? {
+        persistence.dividendPositions.last { $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame }
+    }
+
+    /// 收息股一行：息率、股數與計息基數、年息。數據不完整時直接說明，不讓使用者誤以為那是實測值
     private func incomeHoldingRow(_ holding: IncomeHolding) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -416,7 +438,7 @@ struct DividendCalculatorView: View {
             }
 
             if !holding.isLiveYield {
-                Text("息率為預設值，未取得實際派息記錄")
+                Text("息率為手動或預設值，未取得實際派息記錄")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             } else if !holding.isLivePrice {
