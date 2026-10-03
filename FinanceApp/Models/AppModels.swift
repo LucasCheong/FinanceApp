@@ -239,15 +239,99 @@ struct Account: Identifiable, Codable {
 }
 
 // MARK: - 股票持倉模型
+/// 一支股票的持倉。支援多次購入（分批），自動計算平均成本與合計股數。
 struct StockHolding: Identifiable, Codable {
     var id: UUID = UUID()
     var symbol: String
     var name: String
     var market: StockMarket
-    var shares: Int
-    var purchasePrice: Double
-    var purchaseDate: Date
+    /// 分批購入記錄。每次加倉都會多一筆 Lot
+    var lots: [Lot]
 
+    // MARK: - 買入批次
+    struct Lot: Identifiable, Codable {
+        var id: UUID = UUID()
+        var shares: Int
+        var purchasePrice: Double
+        var purchaseDate: Date
+    }
+
+    // MARK: 聚合計算（向後相容：凡讀 holding.shares / .purchasePrice 的舊程式碼零改動）
+
+    /// 總股數（所有批次合計）
+    var shares: Int { lots.reduce(0) { $0 + $1.shares } }
+
+    /// 加權平均買入價
+    var purchasePrice: Double {
+        let cost = lots.reduce(0.0) { $0 + Double($1.shares) * $1.purchasePrice }
+        return shares > 0 ? cost / Double(shares) : 0
+    }
+
+    /// 最早的買入日期
+    var purchaseDate: Date {
+        lots.min(by: { $0.purchaseDate < $1.purchaseDate })?.purchaseDate ?? Date()
+    }
+
+    /// 總成本
+    var totalCost: Double {
+        lots.reduce(0.0) { $0 + Double($1.shares) * $1.purchasePrice }
+    }
+
+    // MARK: 建構式
+
+    /// 向後相容：單筆持倉（新增介面沿用）
+    init(symbol: String, name: String, market: StockMarket, shares: Int, purchasePrice: Double, purchaseDate: Date) {
+        self.id = UUID()
+        self.symbol = symbol
+        self.name = name
+        self.market = market
+        self.lots = [Lot(shares: shares, purchasePrice: purchasePrice, purchaseDate: purchaseDate)]
+    }
+
+    /// 完整建構式
+    init(id: UUID = UUID(), symbol: String, name: String, market: StockMarket, lots: [Lot]) {
+        self.id = id
+        self.symbol = symbol
+        self.name = name
+        self.market = market
+        self.lots = lots
+    }
+
+    // MARK: Custom Codable（向後相容舊版 JSON）
+    enum CodingKeys: String, CodingKey {
+        case id, symbol, name, market, lots
+        // 僅供解碼舊版 JSON 用
+        case shares, purchasePrice, purchaseDate
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        name = try container.decode(String.self, forKey: .name)
+        market = try container.decode(StockMarket.self, forKey: .market)
+
+        if let decoded = try? container.decode([Lot].self, forKey: .lots), !decoded.isEmpty {
+            lots = decoded
+        } else {
+            // 舊版格式：單筆 shares / purchasePrice / purchaseDate
+            let s = try container.decode(Int.self, forKey: .shares)
+            let p = try container.decode(Double.self, forKey: .purchasePrice)
+            let d = try container.decode(Date.self, forKey: .purchaseDate)
+            lots = [Lot(shares: s, purchasePrice: p, purchaseDate: d)]
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(symbol, forKey: .symbol)
+        try container.encode(name, forKey: .name)
+        try container.encode(market, forKey: .market)
+        try container.encode(lots, forKey: .lots)
+    }
+
+    // MARK: 市場
     enum StockMarket: String, Codable, CaseIterable {
         case us = "美股"
         case hk = "港股"

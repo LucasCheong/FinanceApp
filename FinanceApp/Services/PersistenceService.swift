@@ -371,8 +371,14 @@ final class PersistenceService: ObservableObject {
     }
 
     // MARK: - 股票持倉
+
+    /// 新增持倉。若已有同一支股票，自動將批次併入現有持倉而非另開一筆
     func addHolding(_ holding: StockHolding) {
-        holdings.append(holding)
+        if let index = holdings.firstIndex(where: { $0.symbol.uppercased() == holding.symbol.uppercased() }) {
+            holdings[index].lots.append(contentsOf: holding.lots)
+        } else {
+            holdings.append(holding)
+        }
         saveHoldings()
     }
 
@@ -381,9 +387,20 @@ final class PersistenceService: ObservableObject {
         saveHoldings()
     }
 
-    /// 依 id 刪除持倉（卡片式列表用）
+    /// 依 id 刪除整個持倉（包含所有批次）
     func deleteHolding(_ holding: StockHolding) {
         holdings.removeAll { $0.id == holding.id }
+        saveHoldings()
+        Haptics.warning()
+    }
+
+    /// 刪除持倉中的單一批次。若刪後無批次殘留則整筆刪除
+    func deleteLot(_ lot: StockHolding.Lot, from holdingId: UUID) {
+        guard let index = holdings.firstIndex(where: { $0.id == holdingId }) else { return }
+        holdings[index].lots.removeAll { $0.id == lot.id }
+        if holdings[index].lots.isEmpty {
+            holdings.remove(at: index)
+        }
         saveHoldings()
         Haptics.warning()
     }
@@ -826,7 +843,10 @@ final class PersistenceService: ObservableObject {
         }
 
         transactions = load(transactionsFile) ?? []
-        holdings = load(holdingsFile) ?? []
+        let rawHoldings: [StockHolding] = load(holdingsFile) ?? []
+        holdings = mergeHoldingsBySymbol(rawHoldings)
+        // 舊版資料同一 symbol 可能有多筆，合併後立即寫回以免每次載入都重跞
+        if holdings.count != rawHoldings.count { saveHoldings() }
         invoices = load(invoicesFile) ?? []
         dividendPositions = load(dividendsFile) ?? []
         wealthSnapshots = load(wealthSnapshotsFile) ?? []
@@ -836,6 +856,22 @@ final class PersistenceService: ObservableObject {
         priceAlerts = load(priceAlertsFile) ?? []
         dcaPositions = load(dcaFile) ?? []
         accounts = load(accountsFile) ?? []
+    }
+
+    /// 將同一 symbol 的多筆持倉合併為單一筆（保留各自的批次）。舊版 JSON 遷移用
+    private func mergeHoldingsBySymbol(_ raw: [StockHolding]) -> [StockHolding] {
+        var grouped: [String: StockHolding] = [:]
+        var order: [String] = []
+        for h in raw {
+            let key = h.symbol.uppercased()
+            if grouped[key] != nil {
+                grouped[key]!.lots.append(contentsOf: h.lots)
+            } else {
+                grouped[key] = h
+                order.append(key)
+            }
+        }
+        return order.compactMap { grouped[$0] }
     }
 
     /// 設定基準幣種（全 App 的跨幣種結算與介面顯示幣種）

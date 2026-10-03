@@ -60,6 +60,11 @@ struct DividendCalculatorView: View {
         totalInvestment > 0 ? totalAnnualIncome / totalInvestment : 0
     }
 
+    /// 持倉代碼集合（去重排序），代碼有變就重新拉取報價與息率
+    private var holdingSignature: String {
+        Set(persistence.holdings.map(\.symbol)).sorted().joined(separator: ",")
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -87,8 +92,9 @@ struct DividendCalculatorView: View {
                 .padding()
             }
             .navigationTitle("收息計算器")
-            .task {
+            .task(id: holdingSignature) {
                 // 息率與現價都齊了才辨得出哪些持倉算高息股，進頁面就補上
+                // 持倉代碼集合變了（如新增 / 刪除股票）就會重新執行
                 let symbols = persistence.holdings.map(\.symbol)
                 guard !symbols.isEmpty else { return }
                 await stockService.refreshHoldingQuotes(for: persistence.holdings)

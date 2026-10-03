@@ -9,6 +9,7 @@ struct PortfolioView: View {
     @State private var isRefreshing = false
     @State private var currentQuotes: [String: StockQuote] = [:]
     @State private var showingAssetAllocation = false
+    @State private var expandedHoldings: Set<UUID> = []
 
     // 計算總股票市值（轉換為基準幣種）
     var totalStockValue: Double {
@@ -231,21 +232,58 @@ struct PortfolioView: View {
     }
 
     // MARK: - 持倉列表
-    /// 卡片式列表不在 List 內，.onDelete 不會生效，故用 contextMenu 提供刪除
+    /// 卡片式列表，點擊可展開批次明細，長按可刪除
     private var holdingsList: some View {
         VStack(spacing: 8) {
             ForEach(persistence.holdings) { holding in
-                HoldingRow(holding: holding, quote: currentQuotes[holding.symbol])
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            persistence.deleteHolding(holding)
-                        } label: {
-                            Label("刪除持倉", systemImage: "trash")
+                VStack(spacing: 0) {
+                    HoldingRow(
+                        holding: holding,
+                        quote: currentQuotes[holding.symbol],
+                        isExpanded: expandedHoldings.contains(holding.id),
+                        lotCount: holding.lots.count
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard holding.lots.count > 1 else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if expandedHoldings.contains(holding.id) {
+                                expandedHoldings.remove(holding.id)
+                            } else {
+                                expandedHoldings.insert(holding.id)
+                            }
                         }
                     }
+
+                    if expandedHoldings.contains(holding.id) {
+                        Divider().padding(.horizontal)
+
+                        ForEach(holding.lots) { lot in
+                            LotRow(lot: lot, holding: holding, quote: currentQuotes[holding.symbol])
+                                .contextMenu {
+                                    if holding.lots.count > 1 {
+                                        Button(role: .destructive) {
+                                            persistence.deleteLot(lot, from: holding.id)
+                                        } label: {
+                                            Label("刪除此批次", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                }
+                .background(Color.cardBackground)
+                .cornerRadius(10)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        persistence.deleteHolding(holding)
+                    } label: {
+                        Label("刪除整個持倉", systemImage: "trash")
+                    }
+                }
             }
 
-            Text("長按持倉可刪除")
+            Text("點擊持倉展開批次明細 · 長按可刪除")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -344,6 +382,8 @@ struct PortfolioView: View {
 struct HoldingRow: View {
     let holding: StockHolding
     let quote: StockQuote?
+    var isExpanded: Bool = false
+    var lotCount: Int = 1
 
     private var currentPrice: Double {
         quote?.currentPrice ?? holding.purchasePrice
@@ -354,7 +394,7 @@ struct HoldingRow: View {
     }
 
     private var costValue: Double {
-        Double(holding.shares) * holding.purchasePrice
+        holding.totalCost
     }
 
     private var pnl: Double {
@@ -368,11 +408,19 @@ struct HoldingRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
+                HStack(spacing: 4) {
                     Text(holding.symbol)
                         .font(.subheadline.bold())
                     Text(holding.market.flag)
                         .font(.caption)
+                    if lotCount > 1 {
+                        Text("\(lotCount) 筆")
+                            .font(.caption2)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.financePrimary.opacity(0.15))
+                            .cornerRadius(4)
+                    }
                 }
                 Text(holding.name)
                     .font(.caption)
@@ -399,10 +447,69 @@ struct HoldingRow: View {
                     .font(.caption2)
                     .foregroundStyle(Color.changeColor(pnl))
             }
+
+            if lotCount > 1 {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
-        .background(Color.cardBackground)
-        .cornerRadius(10)
+    }
+}
+
+// MARK: - 批次明細行
+struct LotRow: View {
+    let lot: StockHolding.Lot
+    let holding: StockHolding
+    let quote: StockQuote?
+
+    private var currentPrice: Double {
+        quote?.currentPrice ?? lot.purchasePrice
+    }
+
+    private var lotValue: Double {
+        Double(lot.shares) * currentPrice
+    }
+
+    private var lotCost: Double {
+        Double(lot.shares) * lot.purchasePrice
+    }
+
+    private var pnl: Double {
+        lotValue - lotCost
+    }
+
+    private var pnlPercent: Double {
+        lotCost > 0 ? (pnl / lotCost) * 100 : 0
+    }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(lot.shares) 股 @ \(lot.purchasePrice.compactString())")
+                    .font(.caption)
+                Text(lot.purchaseDate.shortDateString)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(lotValue.moneyString(currency: Currency.from(market: holding.market)))
+                    .font(.caption)
+                HStack(spacing: 2) {
+                    Text(String(format: "%+.2f%%", pnlPercent))
+                        .font(.caption2.bold())
+                    Text("(\(pnl >= 0 ? "+" : "")\(pnl.moneyString(currency: Currency.from(market: holding.market))))")
+                        .font(.caption2)
+                }
+                .foregroundStyle(Color.changeColor(pnl))
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
     }
 }
 
