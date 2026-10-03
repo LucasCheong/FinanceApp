@@ -6,6 +6,7 @@ struct DividendCalculatorView: View {
     /// 高息股要等息率與報價回來才算得出，所以要跟著 StockService 重畫
     @StateObject private var stockService = StockService.shared
     @State private var showingAddPosition = false
+    @State private var isRefreshing = false
 
     /// 從股票組合自動帶入的高息股（息率達門檻者）
     var incomeHoldings: [IncomeHolding] { persistence.incomeHoldings }
@@ -92,22 +93,38 @@ struct DividendCalculatorView: View {
                 .padding()
             }
             .navigationTitle("收息計算器")
+            .refreshable {
+                await refreshData(force: true)
+            }
             .task(id: holdingSignature) {
-                // 息率與現價都齊了才辨得出哪些持倉算高息股，進頁面就補上
-                // 持倉代碼集合變了（如新增 / 刪除股票）就會重新執行
-                let symbols = persistence.holdings.map(\.symbol)
-                guard !symbols.isEmpty else { return }
-                await stockService.refreshHoldingQuotes(for: persistence.holdings)
-                await stockService.refreshDividendYields(for: symbols)
+                // 持倉代碼集合變了（如新增 / 刪除股票）就自動補齊報價與息率
+                await refreshData(force: false)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingAddPosition = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.financePrimary)
+                    HStack {
+                        Button {
+                            Task { await refreshData(force: true) }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                                .animation(
+                                    isRefreshing
+                                        ? .linear(duration: 1).repeatForever(autoreverses: false)
+                                        : .default,
+                                    value: isRefreshing
+                                )
+                        }
+                        .disabled(isRefreshing)
+                        .accessibilityLabel("刷新收息資料")
+
+                        Button {
+                            showingAddPosition = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.financePrimary)
+                        }
                     }
                 }
             }
@@ -115,6 +132,24 @@ struct DividendCalculatorView: View {
                 AddDividendPositionView()
             }
         }
+    }
+
+    /// 更新持倉現價與近 12 個月實際派息；手動刷新會略過 6 小時快取
+    @MainActor
+    private func refreshData(force: Bool) async {
+        guard !isRefreshing else { return }
+        let holdings = persistence.holdings
+        guard !holdings.isEmpty else { return }
+
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        let symbols = holdings.map(\.symbol)
+        await stockService.refreshHoldingQuotes(for: holdings)
+        await stockService.refreshDividendYields(
+            for: symbols,
+            maxAge: force ? 0 : 6 * 3600
+        )
     }
 
     // MARK: - 總收入卡片
