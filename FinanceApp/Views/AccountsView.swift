@@ -183,7 +183,7 @@ struct AccountsView: View {
             if !persistence.transactableAccounts.isEmpty {
                 Menu {
                     ForEach(persistence.transactableAccounts) { account in
-                        Button(account.displayName) {
+                        Button(account.selectionDisplayName) {
                             persistence.assignUnassignedTransactions(to: account.id)
                         }
                     }
@@ -375,6 +375,20 @@ struct AccountRow: View {
                     .foregroundStyle(.tertiary)
             }
 
+            if account.type == .creditCard, let dueDay = account.paymentDueDay {
+                HStack {
+                    Label("每月 \(min(31, max(1, dueDay))) 日還款", systemImage: "calendar.badge.clock")
+                    Spacer()
+                    if account.paymentReminderEnabled == true {
+                        Text(account.effectivePaymentReminderDaysBefore == 0
+                             ? "當天提醒"
+                             : "提前 \(account.effectivePaymentReminderDaysBefore) 天提醒")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
             if account.type == .fixedDeposit {
                 Divider()
                 fixedDepositDetail
@@ -526,6 +540,9 @@ struct AccountEditorView: View {
     @State private var isArchived: Bool
 
     @State private var initialBalance: String
+    @State private var paymentDueDay: Int
+    @State private var paymentReminderEnabled: Bool
+    @State private var paymentReminderDaysBefore: Int
     @State private var principal: String
     /// 以百分比輸入（3.5 代表 3.5%），存入模型時除以 100
     @State private var ratePercent: String
@@ -544,6 +561,9 @@ struct AccountEditorView: View {
         _note = State(initialValue: account?.note ?? "")
         _isArchived = State(initialValue: account?.isArchived ?? false)
         _initialBalance = State(initialValue: Self.numberText(account?.initialBalance))
+        _paymentDueDay = State(initialValue: account?.effectivePaymentDueDay ?? 1)
+        _paymentReminderEnabled = State(initialValue: account?.paymentReminderEnabled ?? false)
+        _paymentReminderDaysBefore = State(initialValue: account?.effectivePaymentReminderDaysBefore ?? 1)
         _principal = State(initialValue: Self.numberText(account?.principal))
         _ratePercent = State(initialValue: Self.numberText(account.map { $0.annualRate * 100 }))
         _startDate = State(initialValue: account?.startDate ?? Date())
@@ -572,6 +592,9 @@ struct AccountEditorView: View {
         account.isArchived = isArchived
         let enteredBalance = Double(initialBalance) ?? 0
         account.initialBalance = type == .creditCard ? max(0, enteredBalance) : enteredBalance
+        account.paymentDueDay = paymentDueDay
+        account.paymentReminderEnabled = paymentReminderEnabled
+        account.paymentReminderDaysBefore = paymentReminderDaysBefore
         account.principal = Double(principal) ?? 0
         account.annualRate = (Double(ratePercent) ?? 0) / 100
         account.startDate = startDate
@@ -761,6 +784,19 @@ struct AccountEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Stepper("每月 \(paymentDueDay) 日還款", value: $paymentDueDay, in: 1...31)
+
+            Toggle("還款日提醒", isOn: $paymentReminderEnabled)
+
+            if paymentReminderEnabled {
+                Picker("提醒時間", selection: $paymentReminderDaysBefore) {
+                    Text("還款日當天").tag(0)
+                    Text("提前 1 天").tag(1)
+                    Text("提前 3 天").tag(3)
+                    Text("提前 7 天").tag(7)
+                }
+            }
+
             if let existing, existing.type == .creditCard {
                 HStack {
                     Text("目前待還")
@@ -771,7 +807,7 @@ struct AccountEditorView: View {
                 }
             }
         } footer: {
-            Text("以正數填入開始使用 App 時的待還結欠。指定到此卡的支出會增加結欠；退款、收入或從銀行帳戶轉入的還款會減少結欠。")
+            Text("以正數填入開始使用 App 時的待還結欠。指定到此卡的支出會增加結欠；退款、收入或從銀行帳戶轉入的還款會減少結欠。若當月沒有設定日期，還款日會按該月最後一天計算，提醒於上午 9:00 發出。")
         }
     }
 

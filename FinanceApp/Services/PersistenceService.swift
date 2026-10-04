@@ -573,6 +573,7 @@ final class PersistenceService: ObservableObject {
     func addAccount(_ account: Account) {
         accounts.append(account)
         saveAccounts()
+        NotificationManager.shared.syncCreditCardPaymentReminders(for: accounts)
         Haptics.success()
     }
 
@@ -583,6 +584,7 @@ final class PersistenceService: ObservableObject {
         // 明確重新賦值，確保收息頁立即收到帳戶餘額／利率更新
         accounts = updated
         saveAccounts()
+        NotificationManager.shared.syncCreditCardPaymentReminders(for: accounts)
     }
 
     func deleteAccount(_ account: Account) {
@@ -603,6 +605,7 @@ final class PersistenceService: ObservableObject {
         if touched { transactions = updated }
         saveAccounts()
         if touched { saveTransactions() }
+        NotificationManager.shared.syncCreditCardPaymentReminders(for: accounts)
     }
 
     func deleteAccounts(at offsets: IndexSet) {
@@ -1047,6 +1050,7 @@ final class PersistenceService: ObservableObject {
         priceAlerts = load(priceAlertsFile) ?? []
         dcaPositions = load(dcaFile) ?? []
         accounts = load(accountsFile) ?? []
+        NotificationManager.shared.syncCreditCardPaymentReminders(for: accounts)
     }
 
     private func setLastImportBatchId(_ batchId: UUID?) {
@@ -1218,6 +1222,7 @@ final class PersistenceService: ObservableObject {
         saveTransactions(); saveHoldings(); saveBudgets()
         saveCustomCategories(); saveDividends(); saveRecurring()
         savePriceAlerts(); saveDCA(); saveAccounts()
+        NotificationManager.shared.syncCreditCardPaymentReminders(for: accounts)
         updateWidgetSnapshot()
         return transactions.count
     }

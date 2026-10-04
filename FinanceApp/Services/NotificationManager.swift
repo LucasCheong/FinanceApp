@@ -80,10 +80,128 @@ final class NotificationManager {
         }
     }
 
+    // MARK: - 信用卡還款提醒
+    private static let creditCardReminderPrefix = "credit_card_payment_"
+    private static let creditCardReminderIdsKey = "creditCardPaymentReminderIds"
+    private static let creditCardReminderLimit = 60
+
+    /// 重新建立所有已啟用的信用卡還款提醒。每張卡最多排程未來 12 個月，
+    /// 並按系統 64 個待處理通知的上限預留空間給其他通知。
+    func syncCreditCardPaymentReminders(for accounts: [Account]) {
+        let center = UNUserNotificationCenter.current()
+        let defaults = UserDefaults.standard
+        let previousIdentifiers = defaults.stringArray(forKey: Self.creditCardReminderIdsKey) ?? []
+        center.removePendingNotificationRequests(withIdentifiers: previousIdentifiers)
+        center.removeDeliveredNotifications(withIdentifiers: previousIdentifiers)
+
+        let creditCards = accounts.filter {
+            $0.type == .creditCard
+                && !$0.isArchived
+                && $0.paymentReminderEnabled == true
+        }
+        guard !creditCards.isEmpty else {
+            defaults.removeObject(forKey: Self.creditCardReminderIdsKey)
+            return
+        }
+
+        requestAuthorization()
+        let remindersPerCard = max(1, min(12, Self.creditCardReminderLimit / creditCards.count))
+        var scheduledIdentifiers: [String] = []
+
+        for account in creditCards {
+            let remainingCapacity = Self.creditCardReminderLimit - scheduledIdentifiers.count
+            guard remainingCapacity > 0 else { break }
+            let occurrenceCount = min(remindersPerCard, remainingCapacity)
+
+            for occurrence in upcomingPaymentReminders(
+                dueDay: account.effectivePaymentDueDay,
+                daysBefore: account.effectivePaymentReminderDaysBefore,
+                count: occurrenceCount
+            ) {
+                let content = UNMutableNotificationContent()
+                content.title = "💳 信用卡還款提醒"
+                content.body = "\(account.selectionDisplayName) 將於 \(occurrence.dueMonth) 月 \(occurrence.dueDay) 日到期，請確認待還結欠。"
+                content.sound = .default
+
+                let identifier = Self.creditCardReminderPrefix
+                    + account.id.uuidString
+                    + "_\(occurrence.dueYear)_\(occurrence.dueMonth)"
+                let trigger = UNCalendarNotificationTrigger(
+                    dateMatching: Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute],
+                        from: occurrence.reminderDate
+                    ),
+                    repeats: false
+                )
+                let request = UNNotificationRequest(
+                    identifier: identifier,
+                    content: content,
+                    trigger: trigger
+                )
+                center.add(request) { error in
+                    if let error {
+                        print("設定信用卡還款提醒失敗: \(error.localizedDescription)")
+                    }
+                }
+                scheduledIdentifiers.append(identifier)
+            }
+        }
+
+        defaults.set(scheduledIdentifiers, forKey: Self.creditCardReminderIdsKey)
+    }
+
+    /// 依每個月實際天數計算還款日；例如設定 31 日時，二月會改用該月最後一天。
+    private func upcomingPaymentReminders(
+        dueDay: Int,
+        daysBefore: Int,
+        count: Int
+    ) -> [(reminderDate: Date, dueYear: Int, dueMonth: Int, dueDay: Int)] {
+        let calendar = Calendar.current
+        let now = Date()
+        var startComponents = calendar.dateComponents([.year, .month], from: now)
+        startComponents.day = 1
+        startComponents.hour = 9
+        startComponents.minute = 0
+        guard let currentMonth = calendar.date(from: startComponents) else { return [] }
+
+        var reminders: [(Date, Int, Int, Int)] = []
+        var monthOffset = 0
+        while reminders.count < count && monthOffset < count + 2 {
+            guard let month = calendar.date(byAdding: .month, value: monthOffset, to: currentMonth),
+                  let dayRange = calendar.range(of: .day, in: .month, for: month)
+            else {
+                monthOffset += 1
+                continue
+            }
+
+            let monthParts = calendar.dateComponents([.year, .month], from: month)
+            let actualDueDay = min(max(1, dueDay), dayRange.count)
+            var dueComponents = DateComponents()
+            dueComponents.calendar = calendar
+            dueComponents.timeZone = calendar.timeZone
+            dueComponents.year = monthParts.year
+            dueComponents.month = monthParts.month
+            dueComponents.day = actualDueDay
+            dueComponents.hour = 9
+            dueComponents.minute = 0
+
+            if let dueDate = calendar.date(from: dueComponents),
+               let reminderDate = calendar.date(byAdding: .day, value: -max(0, daysBefore), to: dueDate),
+               reminderDate > now,
+               let year = monthParts.year,
+               let monthNumber = monthParts.month {
+                reminders.append((reminderDate, year, monthNumber, actualDueDay))
+            }
+            monthOffset += 1
+        }
+        return reminders
+    }
+
     // MARK: - 清除所有通知
     func clearAllNotifications() {
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        UserDefaults.standard.removeObject(forKey: Self.creditCardReminderIdsKey)
     }
 
     // MARK: - 每週記帳提醒

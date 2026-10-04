@@ -14,6 +14,7 @@ struct AccountingView: View {
     @State private var showingExchangeRate = false
     @State private var showingImport = false
     @State private var showingTransfer = false
+    @State private var showingAddCategory = false
     @State private var showingDeleteAllExpenses = false
     @State private var showingDeleteAllExpensesDone = false
     @State private var deletedExpenseCount = 0
@@ -103,6 +104,9 @@ struct AccountingView: View {
                             Button { showingImport = true } label: {
                                 Label("導入支出 (CSV / XLSX)", systemImage: "square.and.arrow.down")
                             }
+                            Button { showingAddCategory = true } label: {
+                                Label("新增自定義類別", systemImage: "tag.circle")
+                            }
                             if persistence.transactableAccounts.count >= 2 {
                                 Divider()
                                 Button { showingTransfer = true } label: {
@@ -158,6 +162,9 @@ struct AccountingView: View {
             }
             .sheet(isPresented: $showingTransfer) {
                 TransferView()
+            }
+            .sheet(isPresented: $showingAddCategory) {
+                AddCustomCategoryView()
             }
             .confirmationDialog(
                 "刪除所有支出？",
@@ -569,7 +576,7 @@ struct AddTransactionView: View {
                         Picker("帳戶", selection: $accountId) {
                             Text("未指定").tag(UUID?.none)
                             ForEach(persistence.transactableAccounts) { account in
-                                Text(account.displayName).tag(Optional(account.id))
+                                Text(account.selectionDisplayName).tag(Optional(account.id))
                             }
                         }
                         .onChange(of: accountId) { newValue in
@@ -687,7 +694,7 @@ struct TransferView: View {
                         Text("請選擇").tag(UUID?.none)
                         ForEach(transferAccounts) { account in
                             HStack {
-                                Text(account.displayName)
+                                Text(account.selectionDisplayName)
                                 Spacer()
                                 Text(persistence.currentBalance(for: account)
                                     .moneyString(currency: account.currency))
@@ -701,7 +708,7 @@ struct TransferView: View {
                         Text("請選擇").tag(UUID?.none)
                         ForEach(targetAccounts) { account in
                             HStack {
-                                Text(account.displayName)
+                                Text(account.selectionDisplayName)
                                 Spacer()
                                 Text(persistence.currentBalance(for: account)
                                     .moneyString(currency: account.currency))
@@ -958,7 +965,7 @@ struct ExpenseImportView: View {
                     Picker("歸屬帳戶", selection: $accountId) {
                         Text("不指定").tag(UUID?.none)
                         ForEach(persistence.transactableAccounts) { account in
-                            Text(account.displayName).tag(Optional(account.id))
+                            Text(account.selectionDisplayName).tag(Optional(account.id))
                         }
                     }
                 }

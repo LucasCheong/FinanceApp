@@ -348,11 +348,26 @@ struct AddCustomCategoryView: View {
         "cart.fill", "heart.fill", "ticket.fill", "wrench.fill", "paintbrush.fill"
     ]
 
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var categoryAlreadyExists: Bool {
+        persistence.allCategoryNames(for: type).contains {
+            $0.caseInsensitiveCompare(trimmedName) == .orderedSame
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("類別名稱") {
                     TextField("輸入類別名稱", text: $name)
+                    if !trimmedName.isEmpty && categoryAlreadyExists {
+                        Label("此類型已有同名類別", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
 
                 Section("類型") {
@@ -389,7 +404,7 @@ struct AddCustomCategoryView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") { saveCategory() }
-                        .disabled(name.isEmpty)
+                        .disabled(trimmedName.isEmpty || categoryAlreadyExists)
                         .bold()
                 }
             }
@@ -398,7 +413,7 @@ struct AddCustomCategoryView: View {
 
     private func saveCategory() {
         let category = CustomCategory(
-            name: name,
+            name: trimmedName,
             icon: icon,
             type: type,
             color: "financePrimary"

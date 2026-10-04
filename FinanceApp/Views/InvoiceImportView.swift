@@ -389,7 +389,7 @@ struct InvoiceReviewSection: View {
             Picker("帳戶", selection: $invoice.accountId) {
                 Text("未指定").tag(UUID?.none)
                 ForEach(persistence.transactableAccounts) { account in
-                    Text(account.displayName).tag(Optional(account.id))
+                    Text(account.selectionDisplayName).tag(Optional(account.id))
                 }
             }
             .onChange(of: invoice.accountId) { accountId in

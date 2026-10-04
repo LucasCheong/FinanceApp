@@ -173,6 +173,11 @@ struct Account: Identifiable, Codable {
     /// 現金及不計入資產帳戶的起始餘額；信用卡帳戶則為開始使用 App 時的待還結欠（正數）
     var initialBalance: Double = 0
 
+    /// 信用卡每月還款日及提醒設定。使用可選欄位以兼容舊版帳戶 JSON。
+    var paymentDueDay: Int? = nil
+    var paymentReminderEnabled: Bool? = nil
+    var paymentReminderDaysBefore: Int? = nil
+
     /// 年利率（小數，0.035 = 3.5%）。現金戶口按當前餘額計息，定期按存入本金計息
     var annualRate: Double = 0
 
@@ -185,6 +190,21 @@ struct Account: Identifiable, Codable {
 
     var displayName: String {
         institution.isEmpty ? name : "\(institution) · \(name)"
+    }
+
+    /// 帳戶選單統一顯示「類別 - 名稱 - 開戶機構」；未填機構時省略末段。
+    var selectionDisplayName: String {
+        let institutionName = institution.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = [type.rawValue, name, institutionName].filter { !$0.isEmpty }
+        return parts.joined(separator: " - ")
+    }
+
+    var effectivePaymentDueDay: Int {
+        min(31, max(1, paymentDueDay ?? 1))
+    }
+
+    var effectivePaymentReminderDaysBefore: Int {
+        min(30, max(0, paymentReminderDaysBefore ?? 1))
     }
 
     // MARK: - 定期存款計算
