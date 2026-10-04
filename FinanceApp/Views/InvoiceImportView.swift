@@ -202,7 +202,7 @@ struct InvoiceImportView: View {
                     imageData: imageData,
                     merchant: parsed.merchant,
                     amount: parsed.amount,
-                    currency: .hkd,
+                    currency: persistence.defaultExpenseCurrency,
                     date: parsed.date,
                     items: parsed.items,
                     rawText: parsed.rawText

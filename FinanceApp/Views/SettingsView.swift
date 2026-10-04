@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 // MARK: - 設定視圖 - 全方位設定中心
 struct SettingsView: View {
     @StateObject private var persistence = PersistenceService.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("appLockEnabled") private var appLockEnabled = false
     @AppStorage("colorScheme") private var colorScheme = "system"
@@ -17,8 +18,11 @@ struct SettingsView: View {
     @AppStorage("weeklyReminderEnabled") private var weeklyReminderEnabled = false
     @AppStorage("weeklyReminderWeekday") private var weeklyReminderWeekday = 1
     @AppStorage("weeklyReminderHour") private var weeklyReminderHour = 20
-    @AppStorage("appIconName") private var appIconName = ""
 
+    @State private var appIconName = ""
+    @State private var isChangingAppIcon = false
+    @State private var appIconError: String?
+    @State private var showingAppIconError = false
     @State private var showingExportSuccess = false
     @State private var exportedURL: URL?
     @State private var showingChangeBaseAlert = false
@@ -97,6 +101,29 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: - 記帳預設
+                Section {
+                    Picker(selection: defaultExpenseCurrencyBinding) {
+                        ForEach(Currency.allCases, id: \.self) { cur in
+                            Text(cur.displayName).tag(cur)
+                        }
+                    } label: {
+                        Label("預設支出幣種", systemImage: "arrow.up.circle")
+                    }
+
+                    Picker(selection: defaultIncomeCurrencyBinding) {
+                        ForEach(Currency.allCases, id: \.self) { cur in
+                            Text(cur.displayName).tag(cur)
+                        }
+                    } label: {
+                        Label("預設收入幣種", systemImage: "arrow.down.circle")
+                    }
+                } header: {
+                    Text("記帳預設")
+                } footer: {
+                    Text("新增支出或收入時自動套用；若選擇帳戶，則以該帳戶幣種為準。")
+                }
+
                 // MARK: - 外觀設定
                 Section("外觀") {
                     Picker("主題", selection: $colorScheme) {
@@ -108,11 +135,11 @@ struct SettingsView: View {
 
                     Picker(selection: iconBinding) {
                         Text("朝陽橙").tag("")
-                        Text("經典藍綠").tag("AppIcon")
                         Text("深邃藍").tag("AppIconDark")
                     } label: {
                         Label("App 圖標", systemImage: "app.badge")
                     }
+                    .disabled(isChangingAppIcon || !UIApplication.shared.supportsAlternateIcons)
                 }
 
                 // MARK: - AI 顧問
@@ -305,6 +332,14 @@ struct SettingsView: View {
             }
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                syncAppIconSelection()
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active {
+                    syncAppIconSelection()
+                }
+            }
             .alert("匯出成功", isPresented: $showingExportSuccess) {
                 Button("確定") { }
             } message: {
@@ -340,6 +375,11 @@ struct SettingsView: View {
                 Button("確定") { }
             } message: {
                 Text(appLockError ?? "")
+            }
+            .alert("無法切換 App 圖標", isPresented: $showingAppIconError) {
+                Button("確定") { }
+            } message: {
+                Text(appIconError ?? "請稍後再試。")
             }
         }
     }
@@ -382,21 +422,54 @@ struct SettingsView: View {
         )
     }
 
-    /// App 圖標選擇 Binding：即時切換圖標
+    /// 新增支出的預設幣種
+    private var defaultExpenseCurrencyBinding: Binding<Currency> {
+        Binding(
+            get: { persistence.defaultExpenseCurrency },
+            set: { persistence.setDefaultExpenseCurrency($0) }
+        )
+    }
+
+    /// 新增收入的預設幣種
+    private var defaultIncomeCurrencyBinding: Binding<Currency> {
+        Binding(
+            get: { persistence.defaultIncomeCurrency },
+            set: { persistence.setDefaultIncomeCurrency($0) }
+        )
+    }
+
+    /// App 圖標選擇 Binding：以系統實際圖標為準，避免本機狀態與 SpringBoard 不同步
     private var iconBinding: Binding<String> {
         Binding(
             get: { appIconName },
             set: { newValue in
+                guard !isChangingAppIcon, newValue != appIconName else { return }
+                guard UIApplication.shared.supportsAlternateIcons else {
+                    appIconError = "目前裝置不支援切換 App 圖標。"
+                    showingAppIconError = true
+                    return
+                }
+
+                isChangingAppIcon = true
                 let target: String? = newValue.isEmpty ? nil : newValue
                 UIApplication.shared.setAlternateIconName(target) { error in
-                    if let error = error {
-                        print("切換圖標失敗: \(error.localizedDescription)")
-                    } else {
-                        appIconName = newValue
+                    let message = error?.localizedDescription
+                    DispatchQueue.main.async {
+                        isChangingAppIcon = false
+                        syncAppIconSelection()
+                        if let message {
+                            appIconError = message
+                            showingAppIconError = true
+                        }
                     }
                 }
             }
         )
+    }
+
+    /// UIApplication 才是目前 App 圖標的權威來源
+    private func syncAppIconSelection() {
+        appIconName = UIApplication.shared.alternateIconName ?? ""
     }
 
     /// 每週提醒開關 Binding

@@ -497,6 +497,9 @@ struct AddTransactionView: View {
                     .pickerStyle(.segmented)
                     .onChange(of: type) { _ in
                         category = currentCategories.first ?? ""
+                        if accountId == nil {
+                            currency = persistence.defaultCurrency(for: type)
+                        }
                     }
                 }
 
@@ -523,10 +526,12 @@ struct AddTransactionView: View {
                             }
                         }
                         .onChange(of: accountId) { newValue in
-                            // 選定帳戶後自動對齊幣種，避免每筆都要手改
+                            // 選定帳戶後以帳戶幣種為準；取消選擇後恢復交易類型的預設幣種
                             if let newValue,
                                let account = persistence.accounts.first(where: { $0.id == newValue }) {
                                 currency = account.currency
+                            } else {
+                                currency = persistence.defaultCurrency(for: type)
                             }
                         }
                     } footer: {
@@ -565,8 +570,12 @@ struct AddTransactionView: View {
             }
             .onAppear {
                 // 只有一個現金帳戶時預設選上，多帳戶由使用者自行指定
-                if accountId == nil, persistence.transactableAccounts.count == 1 {
-                    accountId = persistence.transactableAccounts.first?.id
+                if accountId == nil, persistence.transactableAccounts.count == 1,
+                   let account = persistence.transactableAccounts.first {
+                    accountId = account.id
+                    currency = account.currency
+                } else if accountId == nil {
+                    currency = persistence.defaultCurrency(for: type)
                 }
             }
         }
@@ -918,7 +927,7 @@ struct ExpenseImportView: View {
                 if url.pathExtension.lowercased() == "xlsx" {
                     result = try ExpenseImportParser.parseXLSX(
                         at: url,
-                        defaultCurrency: persistence.baseCurrency
+                        defaultCurrency: persistence.defaultExpenseCurrency
                     )
                 } else {
                     let data = try Data(contentsOf: url)
@@ -927,7 +936,7 @@ struct ExpenseImportView: View {
                         showingError = true
                         return
                     }
-                    result = ExpenseImportParser.parse(text, defaultCurrency: persistence.baseCurrency)
+                    result = ExpenseImportParser.parse(text, defaultCurrency: persistence.defaultExpenseCurrency)
                 }
             } catch {
                 errorMessage = error.localizedDescription

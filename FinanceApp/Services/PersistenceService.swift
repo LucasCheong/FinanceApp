@@ -28,6 +28,8 @@ final class PersistenceService: ObservableObject {
     @Published var dividendPositions: [DividendPosition] = []
     @Published var wealthSnapshots: [WealthSnapshot] = []
     @Published var baseCurrency: Currency = .hkd   // 基準幣種（用於跨幣種結算）
+    @Published var defaultExpenseCurrency: Currency = .hkd
+    @Published var defaultIncomeCurrency: Currency = .hkd
     @Published var exchangeRates: [Currency: Double] = ExchangeRateProvider.defaultRates
     @Published var customCategories: [CustomCategory] = []
     @Published var budgets: [Budget] = []
@@ -897,10 +899,18 @@ final class PersistenceService: ObservableObject {
     }
 
     private func loadAll() {
-        // 載入基準幣種設定
+        // 載入幣種設定
         if let code = UserDefaults.standard.string(forKey: "baseCurrencyCode"),
            let saved = Currency(rawValue: code) {
             baseCurrency = saved
+        }
+        if let code = UserDefaults.standard.string(forKey: "defaultExpenseCurrencyCode"),
+           let saved = Currency(rawValue: code) {
+            defaultExpenseCurrency = saved
+        }
+        if let code = UserDefaults.standard.string(forKey: "defaultIncomeCurrencyCode"),
+           let saved = Currency(rawValue: code) {
+            defaultIncomeCurrency = saved
         }
 
         transactions = load(transactionsFile) ?? []
@@ -942,6 +952,25 @@ final class PersistenceService: ObservableObject {
         UserDefaults.standard.set(currency.code, forKey: "baseCurrencyCode")
     }
 
+    /// 設定新增支出時使用的預設幣種
+    func setDefaultExpenseCurrency(_ currency: Currency) {
+        guard currency != defaultExpenseCurrency else { return }
+        defaultExpenseCurrency = currency
+        UserDefaults.standard.set(currency.code, forKey: "defaultExpenseCurrencyCode")
+    }
+
+    /// 設定新增收入時使用的預設幣種
+    func setDefaultIncomeCurrency(_ currency: Currency) {
+        guard currency != defaultIncomeCurrency else { return }
+        defaultIncomeCurrency = currency
+        UserDefaults.standard.set(currency.code, forKey: "defaultIncomeCurrencyCode")
+    }
+
+    /// 依交易類型取得預設幣種。轉帳由來源帳戶決定幣種
+    func defaultCurrency(for type: Transaction.TransactionType) -> Currency {
+        type == .income ? defaultIncomeCurrency : defaultExpenseCurrency
+    }
+
     // MARK: - 數據導入 / 備份
 
     /// 備份檔案結構。必須走 Codable：JSONSerialization 只接受 NSObject 類型，
@@ -949,6 +978,8 @@ final class PersistenceService: ObservableObject {
     private struct BackupPayload: Codable {
         var exportDate: String
         var baseCurrency: String
+        var defaultExpenseCurrency: String
+        var defaultIncomeCurrency: String
         var data: Payload
 
         struct Payload: Codable {
@@ -969,6 +1000,8 @@ final class PersistenceService: ObservableObject {
         let payload = BackupPayload(
             exportDate: ISO8601DateFormatter().string(from: Date()),
             baseCurrency: baseCurrency.code,
+            defaultExpenseCurrency: defaultExpenseCurrency.code,
+            defaultIncomeCurrency: defaultIncomeCurrency.code,
             data: BackupPayload.Payload(
                 transactions: transactions,
                 holdings: holdings,
@@ -1024,6 +1057,16 @@ final class PersistenceService: ObservableObject {
         if let code = json["baseCurrency"] as? String, let cur = Currency(rawValue: code) {
             baseCurrency = cur
             UserDefaults.standard.set(cur.code, forKey: "baseCurrencyCode")
+        }
+        if let code = json["defaultExpenseCurrency"] as? String,
+           let cur = Currency(rawValue: code) {
+            defaultExpenseCurrency = cur
+            UserDefaults.standard.set(cur.code, forKey: "defaultExpenseCurrencyCode")
+        }
+        if let code = json["defaultIncomeCurrency"] as? String,
+           let cur = Currency(rawValue: code) {
+            defaultIncomeCurrency = cur
+            UserDefaults.standard.set(cur.code, forKey: "defaultIncomeCurrencyCode")
         }
 
         saveTransactions(); saveHoldings(); saveBudgets()

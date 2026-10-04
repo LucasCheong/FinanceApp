@@ -32,6 +32,7 @@ struct AddExpenseIntent: AppIntent {
         }
 
         let persistence = PersistenceService.shared
+        let currency = persistence.defaultExpenseCurrency
         let transaction = Transaction(
             date: Date(),
             amount: amount,
@@ -39,12 +40,12 @@ struct AddExpenseIntent: AppIntent {
             category: category,
             note: note ?? "Siri 快捷記帳",
             source: .manual,
-            currency: persistence.baseCurrency
+            currency: currency
         )
         persistence.addTransaction(transaction)
         persistence.updateWidgetSnapshot()
 
-        let formatted = amount.moneyString(currency: persistence.baseCurrency)
+        let formatted = amount.moneyString(currency: currency)
         return .result(dialog: "已記錄：\(category) \(formatted)")
     }
 }
@@ -68,6 +69,7 @@ struct AddIncomeIntent: AppIntent {
         }
 
         let persistence = PersistenceService.shared
+        let currency = persistence.defaultIncomeCurrency
         let transaction = Transaction(
             date: Date(),
             amount: amount,
@@ -75,12 +77,12 @@ struct AddIncomeIntent: AppIntent {
             category: category,
             note: "Siri 快捷記帳",
             source: .manual,
-            currency: persistence.baseCurrency
+            currency: currency
         )
         persistence.addTransaction(transaction)
         persistence.updateWidgetSnapshot()
 
-        let formatted = amount.moneyString(currency: persistence.baseCurrency)
+        let formatted = amount.moneyString(currency: currency)
         return .result(dialog: "已記錄收入：\(category) \(formatted)")
     }
 }

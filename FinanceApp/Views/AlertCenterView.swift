@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 // MARK: - 警報中心 - 股價警報 + 週期性交易
 struct AlertCenterView: View {
@@ -382,6 +383,7 @@ struct AddRecurringView: View {
                     .pickerStyle(.segmented)
                     .onChange(of: type) { _ in
                         category = persistence.allCategoryNames(for: type).first ?? ""
+                        currency = persistence.defaultCurrency(for: type)
                     }
                 }
 
@@ -425,6 +427,9 @@ struct AddRecurringView: View {
                         .disabled(title.isEmpty || Double(amount) == nil)
                         .bold()
                 }
+            }
+            .onAppear {
+                currency = persistence.defaultCurrency(for: type)
             }
         }
     }
