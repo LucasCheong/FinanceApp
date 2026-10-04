@@ -616,9 +616,11 @@ final class PersistenceService: ObservableObject {
         accounts.filter { !$0.isArchived }
     }
 
-    /// 記帳與轉帳時可選的帳戶：現金戶口及信用卡
+    /// 記帳與轉帳時可選的帳戶：現金、信用卡及不計入資產帳戶
     var transactableAccounts: [Account] {
-        activeAccounts.filter { $0.type == .cash || $0.type == .creditCard }
+        activeAccounts.filter {
+            $0.type == .cash || $0.type == .creditCard || $0.type == .excludedFromAssets
+        }
     }
 
     /// 是否已建立任何帳戶。未建立時各處沿用原本的記帳結餘邏輯
@@ -703,7 +705,7 @@ final class PersistenceService: ObservableObject {
     /// 帳戶目前餘額（以帳戶自身幣種計）
     func currentBalance(for account: Account) -> Double {
         switch account.type {
-        case .cash:
+        case .cash, .excludedFromAssets:
             return account.initialBalance + netTransactionAmount(for: account.id, in: account.currency)
         case .creditCard:
             // 正數代表待還結欠：支出／轉出增加，收入／退款／轉入還款減少
@@ -790,7 +792,7 @@ final class PersistenceService: ObservableObject {
     }
 
     /// 帳戶淨資產（基準幣種）：現金 + 定期 + 投資資產 - 信用卡結欠。
-    /// 資產本身就是資產，沒建對應帳戶也要計入；建了也只計一次，不會翻倍。
+    /// 「不計入資產」帳戶不納入此數值；資產本身沒建對應帳戶也要計入，建了也只計一次。
     var totalAccountAssets: Double {
         totalCashAccountBalance
             + totalFixedDepositValue

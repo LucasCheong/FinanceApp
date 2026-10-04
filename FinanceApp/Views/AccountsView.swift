@@ -1,8 +1,8 @@
 import SwiftUI
 
 // MARK: - 帳戶管理視圖
-/// 現金戶口、信用卡、投資帳戶、定期存款統一在這裡維護。
-/// 信用卡以正數顯示待還結欠，並從帳戶淨資產中扣除。
+/// 現金戶口、信用卡、投資帳戶、定期存款及不計入資產帳戶統一在這裡維護。
+/// 信用卡以正數顯示待還結欠；不計入資產帳戶仍可記帳，但不影響帳戶淨資產。
 struct AccountsView: View {
     @StateObject private var persistence = PersistenceService.shared
     /// 淨資產含股票市值，所以要跟著報價快取重畫
@@ -281,7 +281,7 @@ struct AccountsView: View {
             Text("尚未建立帳戶")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("點擊右上角 + 建立現金戶口、信用卡、投資帳戶或定期存款")
+            Text("點擊右上角 + 建立現金、信用卡、投資、定期或不計入資產帳戶")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -390,6 +390,13 @@ struct AccountRow: View {
                 Text("餘額連動組合分頁的持倉市值")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+            }
+
+            if account.type == .excludedFromAssets {
+                Divider()
+                Label("此帳戶餘額不計入淨資產", systemImage: "eye.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if !account.note.isEmpty {
@@ -582,7 +589,7 @@ struct AccountEditorView: View {
                             Label(t.rawValue, systemImage: t.systemIcon).tag(t)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
 
                     Text(type.explanation)
                         .font(.caption)
@@ -612,6 +619,8 @@ struct AccountEditorView: View {
                 case .fixedDeposit:
                     fixedDepositSection
                     interestPreview
+                case .excludedFromAssets:
+                    excludedFromAssetsSection
                 }
 
                 Section("備註") {
@@ -703,6 +712,39 @@ struct AccountEditorView: View {
             }
         } footer: {
             Text("填入開始使用本 App 時的戶口餘額。之後每筆記帳指定此帳戶，餘額會自動加減。儲蓄戶口可填年利率，利息會計入收息頁；活期戶口留空即可。")
+        }
+    }
+
+    // MARK: - 不計入資產帳戶
+    private var excludedFromAssetsSection: some View {
+        Section {
+            HStack {
+                Text("起始餘額")
+                Spacer()
+                TextField("0", text: $initialBalance)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                Text(currency.code)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let existing, existing.type == .excludedFromAssets {
+                HStack {
+                    Text("記帳淨額")
+                    Spacer()
+                    Text(persistence.netTransactionAmount(for: existing.id, in: currency)
+                        .moneyString(currency: currency))
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("目前餘額")
+                    Spacer()
+                    Text(persistence.currentBalance(for: draft).moneyString(currency: currency))
+                        .bold()
+                }
+            }
+        } footer: {
+            Text("此帳戶可正常用於收入、支出及帳戶轉帳，餘額會自動更新，但不會計入帳戶淨資產。")
         }
     }
 
