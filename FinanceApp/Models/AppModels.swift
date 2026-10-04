@@ -107,12 +107,14 @@ struct Transaction: Identifiable, Codable, Hashable {
 // MARK: - 帳戶類型
 enum AccountType: String, Codable, CaseIterable {
     case cash = "現金"
+    case creditCard = "信用卡"
     case investment = "投資"
     case fixedDeposit = "定期"
 
     var systemIcon: String {
         switch self {
         case .cash: return "banknote"
+        case .creditCard: return "creditcard.fill"
         case .investment: return "chart.line.uptrend.xyaxis"
         case .fixedDeposit: return "lock.circle"
         }
@@ -121,6 +123,7 @@ enum AccountType: String, Codable, CaseIterable {
     var explanation: String {
         switch self {
         case .cash: return "活期或儲蓄戶口，餘額由起始金額加上記帳收支推算，可設年利率"
+        case .creditCard: return "信用卡結欠會隨消費增加，退款及由其他帳戶轉入的還款會減少"
         case .investment: return "餘額自動連動組合分頁的持倉市值，不需手填"
         case .fixedDeposit: return "定期存款，按年利率計息，利息會計入收息頁"
         }
@@ -146,7 +149,7 @@ enum InterestCompounding: String, Codable, CaseIterable {
 }
 
 // MARK: - 帳戶模型
-/// 現金戶口、投資帳戶與定期存款共用同一個型別，定期專用欄位僅在
+/// 現金戶口、信用卡、投資帳戶與定期存款共用同一個型別，定期專用欄位僅在
 /// type == .fixedDeposit 時有意義。所有利息計算都收在這裡，確保帳戶頁、
 /// 收息頁、財務顧問三處用的是同一套算法。
 struct Account: Identifiable, Codable {
@@ -160,7 +163,7 @@ struct Account: Identifiable, Codable {
     var createdAt: Date = Date()
     var isArchived: Bool = false
 
-    /// 現金帳戶的起始餘額，記帳收支在此之上累加
+    /// 現金帳戶的起始餘額；信用卡帳戶則為開始使用 App 時的待還結欠（正數）
     var initialBalance: Double = 0
 
     /// 年利率（小數，0.035 = 3.5%）。現金戶口按當前餘額計息，定期按存入本金計息

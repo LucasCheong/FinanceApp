@@ -4,7 +4,7 @@ import Foundation
 // MARK: - Siri / 捷徑 App Intents（iOS 16+）
 
 /// 快速記帳指令：可透過 Siri 語音或「捷徑」App 调用
-/// 例如：「嘿 Siri，用財務管家記一筆支出」
+/// 例如：「嘿 Siri，用養我吧記一筆支出」
 struct AddExpenseIntent: AppIntent {
     static var title: LocalizedStringResource = "快速記帳"
     static var description = IntentDescription("用語音快速記一筆支出或收入")

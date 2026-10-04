@@ -1,11 +1,11 @@
 import SwiftUI
 
 // MARK: - 帳戶管理視圖
-/// 現金戶口、投資帳戶、定期存款統一在這裡維護。
-/// 現金帳戶餘額 = 起始餘額 + 記帳收支；投資帳戶連動組合市值；定期按利率計息。
+/// 現金戶口、信用卡、投資帳戶、定期存款統一在這裡維護。
+/// 信用卡以正數顯示待還結欠，並從帳戶淨資產中扣除。
 struct AccountsView: View {
     @StateObject private var persistence = PersistenceService.shared
-    /// 總資產含股票市值，所以要跟著報價快取重畫
+    /// 淨資產含股票市值，所以要跟著報價快取重畫
     @StateObject private var stockService = StockService.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -41,7 +41,7 @@ struct AccountsView: View {
             }
             .navigationTitle("我的帳戶")
             .task {
-                // 進頁面就拉一次持倉報價，不然總資產裡的股票只能用成本價
+                // 進頁面就拉一次持倉報價，不然淨資產裡的股票只能用成本價
                 await stockService.refreshHoldingQuotes(for: persistence.holdings)
             }
             .toolbar {
@@ -90,10 +90,10 @@ struct AccountsView: View {
         persistence.accounts.filter { $0.isArchived }
     }
 
-    // MARK: - 總資產卡片
+    // MARK: - 淨資產卡片
     private var totalAssetsCard: some View {
         VStack(spacing: 12) {
-            Text("帳戶總資產")
+            Text("帳戶淨資產")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -105,7 +105,7 @@ struct AccountsView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
-            HStack(spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 12) {
                 AssetBreakdownItem(
                     title: "現金",
                     amount: persistence.totalCashAccountBalance,
@@ -136,6 +136,15 @@ struct AccountsView: View {
                         currency: persistence.baseCurrency,
                         icon: "percent",
                         color: .purple
+                    )
+                }
+                if persistence.totalCreditCardLiability != 0 {
+                    AssetBreakdownItem(
+                        title: "卡結欠",
+                        amount: -persistence.totalCreditCardLiability,
+                        currency: persistence.baseCurrency,
+                        icon: AccountType.creditCard.systemIcon,
+                        color: .red
                     )
                 }
             }
@@ -233,7 +242,7 @@ struct AccountsView: View {
                 Label("已封存", systemImage: "archivebox")
                     .font(.headline)
                 Spacer()
-                Text("不計入總資產")
+                Text("不計入淨資產")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -272,7 +281,7 @@ struct AccountsView: View {
             Text("尚未建立帳戶")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("點擊右上角 + 建立現金戶口、投資帳戶或定期存款")
+            Text("點擊右上角 + 建立現金戶口、信用卡、投資帳戶或定期存款")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -323,6 +332,13 @@ struct AccountRow: View {
         persistence.currentBalance(for: account)
     }
 
+    private var balanceColor: Color {
+        if account.type == .creditCard {
+            return balance > 0 ? .loss : .gain
+        }
+        return balance >= 0 ? .primary : .loss
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
@@ -339,9 +355,14 @@ struct AccountRow: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
+                    if account.type == .creditCard {
+                        Text(balance > 0 ? "待還結欠" : "溢繳餘額")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Text(balance.moneyString(currency: account.currency))
                         .font(.headline)
-                        .foregroundStyle(balance >= 0 ? Color.primary : Color.loss)
+                        .foregroundStyle(balanceColor)
                     Text(account.currency.code)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -542,7 +563,8 @@ struct AccountEditorView: View {
         account.currency = currency
         account.note = note
         account.isArchived = isArchived
-        account.initialBalance = Double(initialBalance) ?? 0
+        let enteredBalance = Double(initialBalance) ?? 0
+        account.initialBalance = type == .creditCard ? max(0, enteredBalance) : enteredBalance
         account.principal = Double(principal) ?? 0
         account.annualRate = (Double(ratePercent) ?? 0) / 100
         account.startDate = startDate
@@ -583,6 +605,8 @@ struct AccountEditorView: View {
                     if draft.hasInterestRate {
                         cashInterestPreview
                     }
+                case .creditCard:
+                    creditCardSection
                 case .investment:
                     investmentSection
                 case .fixedDeposit:
@@ -598,7 +622,7 @@ struct AccountEditorView: View {
                 Section {
                     Toggle("封存此帳戶", isOn: $isArchived)
                 } footer: {
-                    Text("封存後不計入總資產，也不會出現在記帳的帳戶選項中，但歷史記錄保留。")
+                    Text("封存後不計入淨資產，也不會出現在記帳的帳戶選項中，但歷史記錄保留。")
                 }
 
                 if existing != nil {
@@ -634,7 +658,7 @@ struct AccountEditorView: View {
                     dismiss()
                 }
             } message: {
-                Text("此帳戶的餘額與定期利息會從總資產移除。")
+                Text("此帳戶的餘額、結欠與定期利息會從淨資產移除。")
             }
         }
     }
@@ -682,6 +706,33 @@ struct AccountEditorView: View {
         }
     }
 
+    // MARK: - 信用卡帳戶
+    private var creditCardSection: some View {
+        Section {
+            HStack {
+                Text("期初結欠")
+                Spacer()
+                TextField("0", text: $initialBalance)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                Text(currency.code)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let existing, existing.type == .creditCard {
+                HStack {
+                    Text("目前待還")
+                    Spacer()
+                    Text(persistence.currentBalance(for: draft).moneyString(currency: currency))
+                        .bold()
+                        .foregroundStyle(persistence.currentBalance(for: draft) > 0 ? Color.loss : Color.gain)
+                }
+            }
+        } footer: {
+            Text("以正數填入開始使用 App 時的待還結欠。指定到此卡的支出會增加結欠；退款、收入或從銀行帳戶轉入的還款會減少結欠。")
+        }
+    }
+
     // MARK: - 投資帳戶
     private var investmentSection: some View {
         Section {
@@ -692,7 +743,7 @@ struct AccountEditorView: View {
                     .bold()
             }
         } footer: {
-            Text("投資帳戶餘額由組合分頁的持倉自動計算（現價 × 股數，取不到報價時用成本價）。建立多個投資帳戶時，總資產只會計算一次組合市值，避免重複。")
+            Text("投資帳戶餘額由組合分頁的持倉自動計算（現價 × 股數，取不到報價時用成本價）。建立多個投資帳戶時，淨資產只會計算一次組合市值，避免重複。")
         }
     }
 

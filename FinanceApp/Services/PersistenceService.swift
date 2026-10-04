@@ -515,12 +515,20 @@ final class PersistenceService: ObservableObject {
 
     func deleteAccount(_ account: Account) {
         accounts.removeAll { $0.id == account.id }
-        // 已登記到此帳戶的交易改回未指定，不留下指向不存在帳戶的引用
+        // 已登記到此帳戶的交易改回未指定，不留下來源或轉入目標的無效引用
+        var updated = transactions
         var touched = false
-        for index in transactions.indices where transactions[index].accountId == account.id {
-            transactions[index].accountId = nil
-            touched = true
+        for index in updated.indices {
+            if updated[index].accountId == account.id {
+                updated[index].accountId = nil
+                touched = true
+            }
+            if updated[index].transferToAccountId == account.id {
+                updated[index].transferToAccountId = nil
+                touched = true
+            }
         }
+        if touched { transactions = updated }
         saveAccounts()
         if touched { saveTransactions() }
     }
@@ -536,9 +544,9 @@ final class PersistenceService: ObservableObject {
         accounts.filter { !$0.isArchived }
     }
 
-    /// 記帳時可選的帳戶：只有現金戶口參與日常收支
+    /// 記帳與轉帳時可選的帳戶：現金戶口及信用卡
     var transactableAccounts: [Account] {
-        activeAccounts.filter { $0.type == .cash }
+        activeAccounts.filter { $0.type == .cash || $0.type == .creditCard }
     }
 
     /// 是否已建立任何帳戶。未建立時各處沿用原本的記帳結餘邏輯
@@ -568,7 +576,7 @@ final class PersistenceService: ObservableObject {
     /// 尚未歸屬到任何帳戶的記帳淨額（基準幣種）
     var unassignedCashFlow: Double {
         transactions.reduce(0.0) { total, tx in
-            guard tx.accountId == nil else { return total }
+            guard tx.accountId == nil, tx.type != .transfer else { return total }
             let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
             return tx.type == .income ? total + amount : total - amount
         }
@@ -576,14 +584,15 @@ final class PersistenceService: ObservableObject {
 
     /// 未歸屬帳戶的交易筆數
     var unassignedTransactionCount: Int {
-        transactions.filter { $0.accountId == nil }.count
+        transactions.filter { $0.accountId == nil && $0.type != .transfer }.count
     }
 
     /// 把所有未歸屬的交易一次歸入指定帳戶
     func assignUnassignedTransactions(to accountId: UUID) {
         var updated = transactions
         var touched = false
-        for index in updated.indices where updated[index].accountId == nil {
+        for index in updated.indices
+        where updated[index].accountId == nil && updated[index].type != .transfer {
             updated[index].accountId = accountId
             touched = true
         }
@@ -612,6 +621,9 @@ final class PersistenceService: ObservableObject {
         switch account.type {
         case .cash:
             return account.initialBalance + netTransactionAmount(for: account.id, in: account.currency)
+        case .creditCard:
+            // 正數代表待還結欠：支出／轉出增加，收入／退款／轉入還款減少
+            return account.initialBalance - netTransactionAmount(for: account.id, in: account.currency)
         case .investment:
             return portfolioMarketValue(in: account.currency)
         case .fixedDeposit:
@@ -633,6 +645,12 @@ final class PersistenceService: ObservableObject {
     /// 定期存款本金加已累積利息（基準幣種）
     var totalFixedDepositValue: Double {
         activeAccounts.filter { $0.type == .fixedDeposit }
+            .reduce(0) { $0 + balanceInBaseCurrency(for: $1) }
+    }
+
+    /// 信用卡待還結欠（基準幣種）；負數代表信用卡有溢繳餘額
+    var totalCreditCardLiability: Double {
+        activeAccounts.filter { $0.type == .creditCard }
             .reduce(0) { $0 + balanceInBaseCurrency(for: $1) }
     }
 
@@ -687,13 +705,14 @@ final class PersistenceService: ObservableObject {
         interestBearingCashBalance + totalFixedDepositPrincipal
     }
 
-    /// 帳戶總資產（基準幣種）：現金 + 定期 + 組合持倉市值 + 手動登記的收息股。
+    /// 帳戶淨資產（基準幣種）：現金 + 定期 + 投資資產 - 信用卡結欠。
     /// 資產本身就是資產，沒建對應帳戶也要計入；建了也只計一次，不會翻倍。
     var totalAccountAssets: Double {
         totalCashAccountBalance
             + totalFixedDepositValue
             + portfolioMarketValue(in: baseCurrency)
             + dividendPositionsValue(in: baseCurrency)
+            - totalCreditCardLiability
     }
 
     // MARK: - 收息型資產

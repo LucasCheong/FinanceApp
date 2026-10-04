@@ -1,12 +1,10 @@
 import SwiftUI
-import UIKit
 import LocalAuthentication
 import UniformTypeIdentifiers
 
 // MARK: - 設定視圖 - 全方位設定中心
 struct SettingsView: View {
     @StateObject private var persistence = PersistenceService.shared
-    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("appLockEnabled") private var appLockEnabled = false
     @AppStorage("colorScheme") private var colorScheme = "system"
@@ -19,10 +17,6 @@ struct SettingsView: View {
     @AppStorage("weeklyReminderWeekday") private var weeklyReminderWeekday = 1
     @AppStorage("weeklyReminderHour") private var weeklyReminderHour = 20
 
-    @State private var appIconName = ""
-    @State private var isChangingAppIcon = false
-    @State private var appIconError: String?
-    @State private var showingAppIconError = false
     @State private var showingExportSuccess = false
     @State private var exportedURL: URL?
     @State private var showingChangeBaseAlert = false
@@ -133,13 +127,6 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker(selection: iconBinding) {
-                        Text("朝陽橙").tag("")
-                        Text("深邃藍").tag("AppIconDark")
-                    } label: {
-                        Label("App 圖標", systemImage: "app.badge")
-                    }
-                    .disabled(isChangingAppIcon || !UIApplication.shared.supportsAlternateIcons)
                 }
 
                 // MARK: - AI 顧問
@@ -332,14 +319,6 @@ struct SettingsView: View {
             }
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                syncAppIconSelection()
-            }
-            .onChange(of: scenePhase) { phase in
-                if phase == .active {
-                    syncAppIconSelection()
-                }
-            }
             .alert("匯出成功", isPresented: $showingExportSuccess) {
                 Button("確定") { }
             } message: {
@@ -375,11 +354,6 @@ struct SettingsView: View {
                 Button("確定") { }
             } message: {
                 Text(appLockError ?? "")
-            }
-            .alert("無法切換 App 圖標", isPresented: $showingAppIconError) {
-                Button("確定") { }
-            } message: {
-                Text(appIconError ?? "請稍後再試。")
             }
         }
     }
@@ -438,39 +412,6 @@ struct SettingsView: View {
         )
     }
 
-    /// App 圖標選擇 Binding：以系統實際圖標為準，避免本機狀態與 SpringBoard 不同步
-    private var iconBinding: Binding<String> {
-        Binding(
-            get: { appIconName },
-            set: { newValue in
-                guard !isChangingAppIcon, newValue != appIconName else { return }
-                guard UIApplication.shared.supportsAlternateIcons else {
-                    appIconError = "目前裝置不支援切換 App 圖標。"
-                    showingAppIconError = true
-                    return
-                }
-
-                isChangingAppIcon = true
-                let target: String? = newValue.isEmpty ? nil : newValue
-                UIApplication.shared.setAlternateIconName(target) { error in
-                    let message = error?.localizedDescription
-                    DispatchQueue.main.async {
-                        isChangingAppIcon = false
-                        syncAppIconSelection()
-                        if let message {
-                            appIconError = message
-                            showingAppIconError = true
-                        }
-                    }
-                }
-            }
-        )
-    }
-
-    /// UIApplication 才是目前 App 圖標的權威來源
-    private func syncAppIconSelection() {
-        appIconName = UIApplication.shared.alternateIconName ?? ""
-    }
 
     /// 每週提醒開關 Binding
     private var weeklyReminderBinding: Binding<Bool> {
@@ -641,7 +582,7 @@ struct AppLockView: View {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: 64))
                     .foregroundStyle(.financePrimary)
-                Text("財務管家已鎖定")
+                Text("養我吧已鎖定")
                     .font(.headline)
 
                 if let failureMessage {
@@ -699,7 +640,7 @@ struct AppLockView: View {
         }
 
         isAuthenticating = true
-        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "解鎖財務管家") { success, authError in
+        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "解鎖養我吧") { success, authError in
             DispatchQueue.main.async {
                 isAuthenticating = false
                 if success {

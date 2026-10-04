@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>FinanceApp</string>
+    <string>養我吧</string>
     <key>CFBundleDisplayName</key>
-    <string>財務管家</string>
+    <string>養我吧</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleVersion</key>

@@ -183,11 +183,11 @@ struct AccountingView: View {
                 }
             }
 
-            // 建立帳戶後額外顯示定期與帳戶總額，避免現金結餘被誤讀成全部資產
+            // 建立帳戶後額外顯示定期、信用卡結欠與淨資產
             if persistence.hasAccounts {
                 Divider()
                 HStack {
-                    Label("帳戶總資產", systemImage: "building.columns")
+                    Label("帳戶淨資產", systemImage: "building.columns")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -203,6 +203,17 @@ struct AccountingView: View {
                         Text(persistence.totalFixedDepositValue.moneyString(currency: persistence.baseCurrency))
                             .font(.caption.bold())
                             .foregroundStyle(.orange)
+                    }
+                }
+                if persistence.totalCreditCardLiability != 0 {
+                    HStack {
+                        Label("信用卡結欠", systemImage: AccountType.creditCard.systemIcon)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(persistence.totalCreditCardLiability.moneyString(currency: persistence.baseCurrency))
+                            .font(.caption.bold())
+                            .foregroundStyle(persistence.totalCreditCardLiability > 0 ? Color.loss : Color.gain)
                     }
                 }
             }
@@ -535,7 +546,7 @@ struct AddTransactionView: View {
                             }
                         }
                     } footer: {
-                        Text("選定帳戶後，此筆金額會自動加減該帳戶餘額。")
+                        Text("現金帳戶按收入增加、支出減少；信用卡則按支出增加結欠、收入或退款減少結欠。")
                     }
                 }
 
@@ -569,7 +580,7 @@ struct AddTransactionView: View {
                 }
             }
             .onAppear {
-                // 只有一個現金帳戶時預設選上，多帳戶由使用者自行指定
+                // 只有一個可記帳帳戶時預設選上，多帳戶由使用者自行指定
                 if accountId == nil, persistence.transactableAccounts.count == 1,
                    let account = persistence.transactableAccounts.first {
                     accountId = account.id
@@ -601,8 +612,8 @@ struct AddTransactionView: View {
 }
 
 // MARK: - 帳戶轉帳視圖
-/// 在現金帳戶之間轉移資金。建立一筆 .transfer 交易，
-/// 來源帳戶扣除、目標帳戶增加，不影響總收入、總支出統計。
+/// 在現金帳戶與信用卡之間轉移資金。轉入信用卡代表還款，
+/// 不影響總收入、總支出統計。
 struct TransferView: View {
     @StateObject private var persistence = PersistenceService.shared
     @Environment(\.dismiss) private var dismiss
@@ -614,13 +625,13 @@ struct TransferView: View {
     @State private var date = Date()
     @State private var note = ""
 
-    private var cashAccounts: [Account] {
+    private var transferAccounts: [Account] {
         persistence.transactableAccounts
     }
 
     /// 可作為目標的帳戶（排除來源帳戶）
     private var targetAccounts: [Account] {
-        cashAccounts.filter { $0.id != sourceAccountId }
+        transferAccounts.filter { $0.id != sourceAccountId }
     }
 
     private var canSave: Bool {
@@ -638,7 +649,7 @@ struct TransferView: View {
                 Section {
                     Picker("轉出帳戶", selection: $sourceAccountId) {
                         Text("請選擇").tag(UUID?.none)
-                        ForEach(cashAccounts) { account in
+                        ForEach(transferAccounts) { account in
                             HStack {
                                 Text(account.displayName)
                                 Spacer()
@@ -666,7 +677,7 @@ struct TransferView: View {
                 } header: {
                     Text("帳戶")
                 } footer: {
-                    Text("轉帳不影響總收入與總支出統計，僅在兩個帳戶之間移動資金。")
+                    Text("轉帳不影響收支統計；由現金帳戶轉入信用卡即記作還款並減少結欠。")
                 }
 
                 Section("金額") {
@@ -717,10 +728,10 @@ struct TransferView: View {
             }
             .onAppear {
                 // 預設選中前兩個帳戶
-                if cashAccounts.count >= 2 {
-                    sourceAccountId = cashAccounts[0].id
-                    targetAccountId = cashAccounts[1].id
-                    currency = cashAccounts[0].currency
+                if transferAccounts.count >= 2 {
+                    sourceAccountId = transferAccounts[0].id
+                    targetAccountId = transferAccounts[1].id
+                    currency = transferAccounts[0].currency
                 }
             }
         }

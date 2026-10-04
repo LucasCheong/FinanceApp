@@ -1,7 +1,7 @@
 import WidgetKit
 import SwiftUI
 
-// MARK: - 財務管家桌面小組件
+// MARK: - 養我吧桌面小組件
 /// 顯示今日支出、本月支出與持倉概覽，數據來自 App Group UserDefaults
 
 /// App Group 標識（與主 App 的 PersistenceService 保持一致）
@@ -69,7 +69,7 @@ struct FinanceWidgetEntryView: View {
 
     private var smallView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("財務管家", systemImage: "chart.pie.fill")
+            Label("養我吧", systemImage: "chart.pie.fill")
                 .font(.caption.bold())
                 .foregroundStyle(.blue)
 
@@ -94,7 +94,7 @@ struct FinanceWidgetEntryView: View {
     private var mediumView: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Label("財務管家", systemImage: "chart.pie.fill")
+                Label("養我吧", systemImage: "chart.pie.fill")
                     .font(.caption.bold())
                     .foregroundStyle(.blue)
                 Spacer(minLength: 0)
@@ -148,7 +148,7 @@ struct FinanceWidget: Widget {
         StaticConfiguration(kind: kind, provider: FinanceWidgetProvider()) { entry in
             FinanceWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("財務管家")
+        .configurationDisplayName("養我吧")
         .description("查看今日支出、本月累計與持倉概覽")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
