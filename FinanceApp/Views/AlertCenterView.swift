@@ -375,7 +375,7 @@ struct AddRecurringView: View {
                 Section("基本資訊") {
                     TextField("名稱", text: $title)
                     Picker("類型", selection: $type) {
-                        ForEach(Transaction.TransactionType.allCases, id: \.self) { t in
+                        ForEach(Transaction.TransactionType.bookkeepingCases, id: \.self) { t in
                             Text(t.rawValue).tag(t)
                         }
                     }

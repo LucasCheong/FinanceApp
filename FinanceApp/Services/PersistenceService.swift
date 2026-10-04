@@ -231,6 +231,7 @@ final class PersistenceService: ObservableObject {
 
     /// 獲取指定類型的所有類別名稱（預設 + 自定義）
     func allCategoryNames(for type: Transaction.TransactionType) -> [String] {
+        if type == .transfer { return ["帳戶轉帳"] }
         let defaultCategories: [String]
         if type == .income {
             defaultCategories = IncomeCategory.allCases.map { $0.rawValue }
@@ -243,6 +244,7 @@ final class PersistenceService: ObservableObject {
 
     /// 獲取類別圖標（包含自定義類別）
     func categoryIcon(for name: String, type: Transaction.TransactionType) -> String {
+        if type == .transfer { return "arrow.left.arrow.right.circle.fill" }
         if type == .income {
             if let cat = IncomeCategory(rawValue: name) { return cat.icon }
         } else {
@@ -335,6 +337,26 @@ final class PersistenceService: ObservableObject {
 
     // MARK: - 交易記錄
     func addTransaction(_ transaction: Transaction) {
+        transactions.insert(transaction, at: 0)
+        saveTransactions()
+        Haptics.success()
+        updateWidgetSnapshot()
+    }
+
+    /// 帳戶間轉帳：建立一筆 .transfer 交易，同時影響來源帳戶和目標帳戶的餘額
+    func performTransfer(from sourceAccountId: UUID, to targetAccountId: UUID,
+                         amount: Double, currency: Currency, date: Date, note: String) {
+        let transaction = Transaction(
+            date: date,
+            amount: amount,
+            type: .transfer,
+            category: "帳戶轉帳",
+            note: note,
+            source: .manual,
+            currency: currency,
+            accountId: sourceAccountId,
+            transferToAccountId: targetAccountId
+        )
         transactions.insert(transaction, at: 0)
         saveTransactions()
         Haptics.success()
@@ -523,8 +545,20 @@ final class PersistenceService: ObservableObject {
     /// 某帳戶的記帳淨額（收入減支出，換算為指定幣種）
     func netTransactionAmount(for accountId: UUID, in currency: Currency) -> Double {
         transactions.reduce(0.0) { total, tx in
-            guard tx.accountId == accountId else { return total }
             let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: currency)
+
+            // 轉帳：從來源帳戶扣除、轉入目標帳戶
+            if tx.type == .transfer {
+                if tx.accountId == accountId {
+                    return total - amount
+                } else if tx.transferToAccountId == accountId {
+                    return total + amount
+                }
+                return total
+            }
+
+            // 一般收入 / 支出
+            guard tx.accountId == accountId else { return total }
             return tx.type == .income ? total + amount : total - amount
         }
     }
@@ -724,14 +758,14 @@ final class PersistenceService: ObservableObject {
 
     // MARK: - 計算屬性（以基準幣種結算）
 
-    /// 總收入（轉換為基準幣種）
+    /// 總收入（轉換為基準幣種）。轉帳不計入收入
     var totalIncome: Double {
         transactions.filter { $0.type == .income }.reduce(0) { total, tx in
             total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
         }
     }
 
-    /// 總支出（轉換為基準幣種）
+    /// 總支出（轉換為基準幣種）。轉帳不計入支出
     var totalExpense: Double {
         transactions.filter { $0.type == .expense }.reduce(0) { total, tx in
             total + ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)

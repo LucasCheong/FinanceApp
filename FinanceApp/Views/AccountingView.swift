@@ -13,11 +13,13 @@ struct AccountingView: View {
     @State private var showingBudget = false
     @State private var showingExchangeRate = false
     @State private var showingImport = false
+    @State private var showingTransfer = false
 
     enum TransactionFilter: String, CaseIterable {
         case all = "全部"
         case income = "收入"
         case expense = "支出"
+        case transfer = "轉帳"
         case thisMonth = "本月"
     }
 
@@ -30,6 +32,8 @@ struct AccountingView: View {
             result = persistence.transactions.filter { $0.type == .income }
         case .expense:
             result = persistence.transactions.filter { $0.type == .expense }
+        case .transfer:
+            result = persistence.transactions.filter { $0.type == .transfer }
         case .thisMonth:
             result = persistence.transactions.filter { $0.date.isThisMonth }
         }
@@ -92,6 +96,12 @@ struct AccountingView: View {
                             Button { showingImport = true } label: {
                                 Label("導入支出 (CSV / XLSX)", systemImage: "square.and.arrow.down")
                             }
+                            if persistence.transactableAccounts.count >= 2 {
+                                Divider()
+                                Button { showingTransfer = true } label: {
+                                    Label("帳戶轉帳", systemImage: "arrow.left.arrow.right.circle")
+                                }
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.title2)
@@ -131,6 +141,9 @@ struct AccountingView: View {
             }
             .sheet(isPresented: $showingImport) {
                 ExpenseImportView()
+            }
+            .sheet(isPresented: $showingTransfer) {
+                TransferView()
             }
         }
     }
@@ -349,50 +362,109 @@ struct TransactionRow: View {
         return account.name
     }
 
+    /// 轉帳目標帳戶名稱
+    private var targetAccountName: String? {
+        guard let targetId = transaction.transferToAccountId,
+              let account = PersistenceService.shared.accounts.first(where: { $0.id == targetId })
+        else { return nil }
+        return account.name
+    }
+
+    private var isTransfer: Bool { transaction.type == .transfer }
+
     var body: some View {
         HStack(spacing: 12) {
             // 類別圖標
             ZStack {
                 Circle()
-                    .fill(transaction.type == .income ? Color.incomeColor.opacity(0.15) : Color.expenseColor.opacity(0.15))
+                    .fill(iconBackgroundColor.opacity(0.15))
                     .frame(width: 40, height: 40)
                 Image(systemName: categoryIcon)
-                    .foregroundStyle(transaction.type == .income ? .incomeColor : .expenseColor)
+                    .foregroundStyle(iconForegroundColor)
             }
 
             // 詳情
             VStack(alignment: .leading, spacing: 2) {
-                Text(transaction.note.isEmpty ? transaction.category : transaction.note)
-                    .font(.subheadline.bold())
-                HStack {
-                    Text(transaction.category)
-                    Text("·")
-                    Text(transaction.date.shortDateString)
-                    if let accountName {
+                if isTransfer {
+                    Text(transaction.note.isEmpty ? "帳戶轉帳" : transaction.note)
+                        .font(.subheadline.bold())
+                    HStack(spacing: 4) {
+                        if let from = accountName, let to = targetAccountName {
+                            Text(from)
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                            Text(to)
+                        }
                         Text("·")
-                        Label(accountName, systemImage: "building.columns")
+                        Text(transaction.date.shortDateString)
                     }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                if transaction.source == .invoice {
-                    Label("發票導入", systemImage: "doc.viewfinder")
-                        .font(.caption2)
-                        .foregroundStyle(.financePrimary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text(transaction.note.isEmpty ? transaction.category : transaction.note)
+                        .font(.subheadline.bold())
+                    HStack {
+                        Text(transaction.category)
+                        Text("·")
+                        Text(transaction.date.shortDateString)
+                        if let accountName {
+                            Text("·")
+                            Label(accountName, systemImage: "building.columns")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    if transaction.source == .invoice {
+                        Label("發票導入", systemImage: "doc.viewfinder")
+                            .font(.caption2)
+                            .foregroundStyle(.financePrimary)
+                    }
                 }
             }
 
             Spacer()
 
             // 金額
-            Text("\(transaction.type == .income ? "+" : "-")\(transaction.amount.moneyString(currency: transaction.currency))")
+            Text(amountText)
                 .font(.headline)
-                .foregroundStyle(transaction.type == .income ? .incomeColor : .expenseColor)
+                .foregroundStyle(amountColor)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color.cardBackground)
         .cornerRadius(10)
+    }
+
+    private var iconBackgroundColor: Color {
+        switch transaction.type {
+        case .income: return .incomeColor
+        case .expense: return .expenseColor
+        case .transfer: return .financePrimary
+        }
+    }
+
+    private var iconForegroundColor: Color {
+        switch transaction.type {
+        case .income: return .incomeColor
+        case .expense: return .expenseColor
+        case .transfer: return .financePrimary
+        }
+    }
+
+    private var amountText: String {
+        switch transaction.type {
+        case .income: return "+\(transaction.amount.moneyString(currency: transaction.currency))"
+        case .expense: return "-\(transaction.amount.moneyString(currency: transaction.currency))"
+        case .transfer: return transaction.amount.moneyString(currency: transaction.currency)
+        }
+    }
+
+    private var amountColor: Color {
+        switch transaction.type {
+        case .income: return .incomeColor
+        case .expense: return .expenseColor
+        case .transfer: return .financePrimary
+        }
     }
 }
 
@@ -418,7 +490,7 @@ struct AddTransactionView: View {
             Form {
                 Section("交易類型") {
                     Picker("類型", selection: $type) {
-                        ForEach(Transaction.TransactionType.allCases, id: \.self) { t in
+                        ForEach(Transaction.TransactionType.bookkeepingCases, id: \.self) { t in
                             Label(t.rawValue, systemImage: t.systemIcon).tag(t)
                         }
                     }
@@ -515,6 +587,150 @@ struct AddTransactionView: View {
         )
 
         persistence.addTransaction(transaction)
+        dismiss()
+    }
+}
+
+// MARK: - 帳戶轉帳視圖
+/// 在現金帳戶之間轉移資金。建立一筆 .transfer 交易，
+/// 來源帳戶扣除、目標帳戶增加，不影響總收入、總支出統計。
+struct TransferView: View {
+    @StateObject private var persistence = PersistenceService.shared
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var sourceAccountId: UUID?
+    @State private var targetAccountId: UUID?
+    @State private var amount = ""
+    @State private var currency: Currency = .hkd
+    @State private var date = Date()
+    @State private var note = ""
+
+    private var cashAccounts: [Account] {
+        persistence.transactableAccounts
+    }
+
+    /// 可作為目標的帳戶（排除來源帳戶）
+    private var targetAccounts: [Account] {
+        cashAccounts.filter { $0.id != sourceAccountId }
+    }
+
+    private var canSave: Bool {
+        guard let v = Double(amount), v > 0,
+              let src = sourceAccountId,
+              let tgt = targetAccountId,
+              src != tgt
+        else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("轉出帳戶", selection: $sourceAccountId) {
+                        Text("請選擇").tag(UUID?.none)
+                        ForEach(cashAccounts) { account in
+                            HStack {
+                                Text(account.displayName)
+                                Spacer()
+                                Text(persistence.currentBalance(for: account)
+                                    .moneyString(currency: account.currency))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .tag(Optional(account.id))
+                        }
+                    }
+
+                    Picker("轉入帳戶", selection: $targetAccountId) {
+                        Text("請選擇").tag(UUID?.none)
+                        ForEach(targetAccounts) { account in
+                            HStack {
+                                Text(account.displayName)
+                                Spacer()
+                                Text(persistence.currentBalance(for: account)
+                                    .moneyString(currency: account.currency))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .tag(Optional(account.id))
+                        }
+                    }
+                } header: {
+                    Text("帳戶")
+                } footer: {
+                    Text("轉帳不影響總收入與總支出統計，僅在兩個帳戶之間移動資金。")
+                }
+
+                Section("金額") {
+                    TextField("輸入轉帳金額", text: $amount)
+                        .keyboardType(.decimalPad)
+                        .font(.title3)
+                }
+
+                Section("幣種") {
+                    Picker("幣種", selection: $currency) {
+                        ForEach(Currency.allCases, id: \.self) { cur in
+                            Text(cur.displayName).tag(cur)
+                        }
+                    }
+                }
+
+                Section("日期") {
+                    DatePicker("日期", selection: $date, displayedComponents: [.date])
+                }
+
+                Section("備註") {
+                    TextField("添加備註（可選）", text: $note, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+            }
+            .navigationTitle("帳戶轉帳")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("確認轉帳") { performTransfer() }
+                        .disabled(!canSave)
+                        .bold()
+                }
+            }
+            .onChange(of: sourceAccountId) { newValue in
+                // 自動對齊幣種為來源帳戶的幣種
+                if let newValue,
+                   let account = persistence.accounts.first(where: { $0.id == newValue }) {
+                    currency = account.currency
+                }
+                // 目標帳戶與來源相同時清空
+                if targetAccountId == newValue {
+                    targetAccountId = nil
+                }
+            }
+            .onAppear {
+                // 預設選中前兩個帳戶
+                if cashAccounts.count >= 2 {
+                    sourceAccountId = cashAccounts[0].id
+                    targetAccountId = cashAccounts[1].id
+                    currency = cashAccounts[0].currency
+                }
+            }
+        }
+    }
+
+    private func performTransfer() {
+        guard let amountValue = Double(amount), amountValue > 0,
+              let sourceId = sourceAccountId,
+              let targetId = targetAccountId
+        else { return }
+
+        persistence.performTransfer(
+            from: sourceId,
+            to: targetId,
+            amount: amountValue,
+            currency: currency,
+            date: date,
+            note: note
+        )
         dismiss()
     }
 }

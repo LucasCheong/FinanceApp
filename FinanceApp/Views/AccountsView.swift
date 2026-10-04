@@ -11,6 +11,7 @@ struct AccountsView: View {
 
     @State private var showingAddAccount = false
     @State private var editingAccount: Account?
+    @State private var showingTransfer = false
 
     var body: some View {
         NavigationStack {
@@ -48,12 +49,24 @@ struct AccountsView: View {
                     Button("完成") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingAddAccount = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.financePrimary)
+                    HStack(spacing: 12) {
+                        if persistence.transactableAccounts.count >= 2 {
+                            Button {
+                                showingTransfer = true
+                            } label: {
+                                Image(systemName: "arrow.left.arrow.right.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.financePrimary)
+                            }
+                            .accessibilityLabel("帳戶轉帳")
+                        }
+                        Button {
+                            showingAddAccount = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.financePrimary)
+                        }
                     }
                 }
             }
@@ -62,6 +75,9 @@ struct AccountsView: View {
             }
             .sheet(item: $editingAccount) { account in
                 AccountEditorView(account: account)
+            }
+            .sheet(isPresented: $showingTransfer) {
+                TransferView()
             }
         }
     }

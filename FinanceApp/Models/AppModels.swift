@@ -75,16 +75,25 @@ struct Transaction: Identifiable, Codable, Hashable {
     var currency: Currency
     /// 所屬帳戶。舊資料為 nil，不計入任何帳戶餘額
     var accountId: UUID? = nil
+    /// 轉帳目標帳戶。僅在 type == .transfer 時有值
+    var transferToAccountId: UUID? = nil
 
     enum TransactionType: String, Codable, CaseIterable {
         case income = "收入"
         case expense = "支出"
+        case transfer = "轉帳"
 
         var systemIcon: String {
             switch self {
             case .income: return "arrow.down.circle.fill"
             case .expense: return "arrow.up.circle.fill"
+            case .transfer: return "arrow.left.arrow.right.circle.fill"
             }
+        }
+
+        /// 記帳時可選的類型（排除轉帳，轉帳有獨立入口）
+        static var bookkeepingCases: [TransactionType] {
+            [.income, .expense]
         }
     }
 

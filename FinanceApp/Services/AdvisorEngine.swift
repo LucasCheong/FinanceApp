@@ -38,10 +38,11 @@ enum AdvisorEngine {
             let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: base)
             if tx.type == .income {
                 incomeSum += amount
-            } else {
+            } else if tx.type == .expense {
                 expenseSum += amount
                 expenseByCategory[tx.category, default: 0] += amount
             }
+            // .transfer 不計入收入或支出
         }
 
         // 實際覆蓋的月數（避免只有 1 個月數據時把月均算高）
