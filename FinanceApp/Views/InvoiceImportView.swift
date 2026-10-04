@@ -196,16 +196,21 @@ struct InvoiceImportView: View {
                 let text = try await OCRService.shared.recognizeText(in: image)
                 let parsed = OCRService.shared.parseInvoice(from: text)
                 let imageData = image.jpegData(compressionQuality: 0.7)
+                let defaultAccount = persistence.transactableAccounts.count == 1
+                    ? persistence.transactableAccounts.first
+                    : nil
 
                 let parsedData = ParsedInvoiceData(
                     image: image,
                     imageData: imageData,
                     merchant: parsed.merchant,
                     amount: parsed.amount,
-                    currency: persistence.defaultExpenseCurrency,
+                    currency: defaultAccount?.currency ?? persistence.defaultExpenseCurrency,
                     date: parsed.date,
                     items: parsed.items,
-                    rawText: parsed.rawText
+                    rawText: parsed.rawText,
+                    accountId: defaultAccount?.id,
+                    category: ExpenseCategory.other.rawValue
                 )
 
                 await MainActor.run {
@@ -313,10 +318,11 @@ struct InvoiceReviewView: View {
                     date: invoiceData.date,
                     amount: invoiceData.amount,
                     type: .expense,
-                    category: ExpenseCategory.other.rawValue,
+                    category: invoiceData.category,
                     note: "發票: \(invoiceData.merchant)",
                     source: .invoice,
-                    currency: invoiceData.currency
+                    currency: invoiceData.currency,
+                    accountId: invoiceData.accountId
                 )
                 persistence.addTransaction(transaction)
             }
@@ -332,13 +338,16 @@ struct InvoiceReviewView: View {
 struct InvoiceReviewSection: View {
     let index: Int
     @Binding var invoice: ParsedInvoiceData
+    @StateObject private var persistence = PersistenceService.shared
 
     var body: some View {
         Section("發票 #\(index + 1) - \(invoice.merchant)") {
             invoiceImage
             merchantField
             amountField
+            accountField
             currencyField
+            categoryField
             dateField
             itemsSection
             rawTextSection
@@ -371,10 +380,41 @@ struct InvoiceReviewSection: View {
         }
     }
 
+    @ViewBuilder
+    private var accountField: some View {
+        if persistence.transactableAccounts.isEmpty {
+            LabeledContent("帳戶", value: "未建立可記帳帳戶")
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("帳戶", selection: $invoice.accountId) {
+                Text("未指定").tag(UUID?.none)
+                ForEach(persistence.transactableAccounts) { account in
+                    Text(account.displayName).tag(Optional(account.id))
+                }
+            }
+            .onChange(of: invoice.accountId) { accountId in
+                if let accountId,
+                   let account = persistence.transactableAccounts.first(where: { $0.id == accountId }) {
+                    invoice.currency = account.currency
+                } else {
+                    invoice.currency = persistence.defaultExpenseCurrency
+                }
+            }
+        }
+    }
+
     private var currencyField: some View {
         Picker("幣種", selection: $invoice.currency) {
             ForEach(Currency.allCases, id: \.self) { cur in
                 Text(cur.displayName).tag(cur)
+            }
+        }
+    }
+
+    private var categoryField: some View {
+        Picker("類別", selection: $invoice.category) {
+            ForEach(persistence.allCategoryNames(for: .expense), id: \.self) { category in
+                Text(category).tag(category)
             }
         }
     }
@@ -416,4 +456,6 @@ struct ParsedInvoiceData: Identifiable {
     var date: Date
     var items: [String]
     var rawText: String
+    var accountId: UUID?
+    var category: String
 }
