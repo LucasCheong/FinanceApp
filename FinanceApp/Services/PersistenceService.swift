@@ -428,6 +428,21 @@ final class PersistenceService: ObservableObject {
         return deletedCount
     }
 
+    /// 刪除所有支出交易，保留收入、帳戶轉帳及發票原始記錄。
+    @discardableResult
+    func deleteAllExpenses() -> Int {
+        let oldCount = transactions.count
+        transactions.removeAll { $0.type == .expense }
+        let deletedCount = oldCount - transactions.count
+        guard deletedCount > 0 else { return 0 }
+
+        reconcileLastImportBatch()
+        saveTransactions()
+        Haptics.warning()
+        updateWidgetSnapshot()
+        return deletedCount
+    }
+
     func deleteTransaction(at indexSet: IndexSet) {
         transactions.remove(atOffsets: indexSet)
         reconcileLastImportBatch()

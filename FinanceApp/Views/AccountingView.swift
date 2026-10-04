@@ -14,6 +14,9 @@ struct AccountingView: View {
     @State private var showingExchangeRate = false
     @State private var showingImport = false
     @State private var showingTransfer = false
+    @State private var showingDeleteAllExpenses = false
+    @State private var showingDeleteAllExpensesDone = false
+    @State private var deletedExpenseCount = 0
 
     enum TransactionFilter: String, CaseIterable {
         case all = "全部"
@@ -49,6 +52,10 @@ struct AccountingView: View {
             }
         }
         return result
+    }
+
+    private var expenseCount: Int {
+        persistence.transactions.filter { $0.type == .expense }.count
     }
 
     var body: some View {
@@ -102,6 +109,13 @@ struct AccountingView: View {
                                     Label("帳戶轉帳", systemImage: "arrow.left.arrow.right.circle")
                                 }
                             }
+                            Divider()
+                            Button(role: .destructive) {
+                                showingDeleteAllExpenses = true
+                            } label: {
+                                Label("刪除所有支出", systemImage: "trash")
+                            }
+                            .disabled(expenseCount == 0)
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.title2)
@@ -144,6 +158,24 @@ struct AccountingView: View {
             }
             .sheet(isPresented: $showingTransfer) {
                 TransferView()
+            }
+            .confirmationDialog(
+                "刪除所有支出？",
+                isPresented: $showingDeleteAllExpenses,
+                titleVisibility: .visible
+            ) {
+                Button("永久刪除 \(expenseCount) 筆支出", role: .destructive) {
+                    deletedExpenseCount = persistence.deleteAllExpenses()
+                    showingDeleteAllExpensesDone = deletedExpenseCount > 0
+                }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("此操作無法復原。所有手動、發票及 CSV / XLSX 匯入的支出記帳都會被刪除；收入、帳戶轉帳及發票原始記錄不受影響。")
+            }
+            .alert("刪除完成", isPresented: $showingDeleteAllExpensesDone) {
+                Button("確定") { }
+            } message: {
+                Text("已刪除 \(deletedExpenseCount) 筆支出記錄。")
             }
         }
     }
