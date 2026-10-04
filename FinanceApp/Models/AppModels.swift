@@ -77,6 +77,10 @@ struct Transaction: Identifiable, Codable, Hashable {
     var accountId: UUID? = nil
     /// 轉帳目標帳戶。僅在 type == .transfer 時有值
     var transferToAccountId: UUID? = nil
+    /// CSV / XLSX 匯入批次識別，用於快速刪除最近一次匯入
+    var importBatchId: UUID? = nil
+    /// true 代表僅作歷史統計，不影響任何帳戶或未歸屬現金結餘；可選型別兼容舊資料
+    var isHistoricalExpense: Bool? = nil
 
     enum TransactionType: String, Codable, CaseIterable {
         case income = "收入"

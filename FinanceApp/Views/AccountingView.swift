@@ -429,6 +429,10 @@ struct TransactionRow: View {
                         Label("發票導入", systemImage: "doc.viewfinder")
                             .font(.caption2)
                             .foregroundStyle(.financePrimary)
+                    } else if transaction.isHistoricalExpense == true {
+                        Label("歷史支出 · 不影響帳戶", systemImage: "clock.arrow.circlepath")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -766,6 +770,8 @@ struct ExpenseImportView: View {
     @State private var result: ExpenseImportParser.Result?
     @State private var fileName = ""
     @State private var accountId: UUID?
+    @State private var isHistoricalExpense = false
+    @State private var showingDeleteLastImport = false
     @State private var errorMessage: String?
     @State private var showingError = false
     @State private var showingCopyHint = false
@@ -776,6 +782,10 @@ struct ExpenseImportView: View {
         NavigationStack {
             Form {
                 formatSection
+
+                if !persistence.lastImportedTransactions.isEmpty {
+                    lastImportSection
+                }
 
                 Section {
                     Button {
@@ -812,6 +822,18 @@ struct ExpenseImportView: View {
             .fileImporter(isPresented: $showingFilePicker,
                           allowedContentTypes: [.commaSeparatedText, Self.xlsxType]) { outcome in
                 handlePick(outcome)
+            }
+            .confirmationDialog(
+                "刪除上一次導入數據？",
+                isPresented: $showingDeleteLastImport,
+                titleVisibility: .visible
+            ) {
+                Button("刪除 \(persistence.lastImportedTransactions.count) 筆記錄", role: .destructive) {
+                    persistence.deleteLastImportBatch()
+                }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("只會刪除最近一次 CSV / XLSX 導入的整個批次，其他記帳不受影響。")
             }
             .alert("匯入完成", isPresented: $showingImportDone) {
                 Button("完成") { dismiss() }
@@ -857,6 +879,33 @@ struct ExpenseImportView: View {
         }
     }
 
+    // MARK: - 上次匯入
+    private var lastImportSection: some View {
+        let transactions = persistence.lastImportedTransactions
+        let dates = transactions.map(\.date)
+        let earliest = dates.min()?.shortDateString ?? "—"
+        let latest = dates.max()?.shortDateString ?? "—"
+        let range = earliest == latest ? earliest : "\(earliest) 至 \(latest)"
+        let historicalCount = transactions.filter { $0.isHistoricalExpense == true }.count
+
+        return Section {
+            LabeledContent("記錄", value: "\(transactions.count) 筆")
+            LabeledContent("支出日期", value: range)
+            if historicalCount > 0 {
+                LabeledContent("歷史支出", value: "\(historicalCount) 筆")
+            }
+            Button(role: .destructive) {
+                showingDeleteLastImport = true
+            } label: {
+                Label("刪除上一次導入數據", systemImage: "arrow.uturn.backward.circle")
+            }
+        } header: {
+            Text("上一次導入")
+        } footer: {
+            Text("刪除後無法復原，只會移除最近一次導入的批次。")
+        }
+    }
+
     // MARK: - 解析結果
     @ViewBuilder
     private func resultSection(_ result: ExpenseImportParser.Result) -> some View {
@@ -867,16 +916,27 @@ struct ExpenseImportView: View {
                     .foregroundStyle(.orange)
             }
         } else {
-            if !persistence.transactableAccounts.isEmpty {
-                Section {
+            Section {
+                Toggle("作為歷史支出", isOn: $isHistoricalExpense)
+                    .onChange(of: isHistoricalExpense) { historical in
+                        if historical { accountId = nil }
+                    }
+
+                if !isHistoricalExpense && !persistence.transactableAccounts.isEmpty {
                     Picker("歸屬帳戶", selection: $accountId) {
                         Text("不指定").tag(UUID?.none)
                         ForEach(persistence.transactableAccounts) { account in
                             Text(account.displayName).tag(Optional(account.id))
                         }
                     }
-                } footer: {
-                    Text("選定帳戶後，匯入的每筆支出會自動扣減該帳戶餘額。")
+                }
+            } header: {
+                Text("匯入方式")
+            } footer: {
+                if isHistoricalExpense {
+                    Text("歷史支出會保留在支出統計及分析中，但不歸屬任何帳戶，也不會扣減現金或信用卡金額。")
+                } else {
+                    Text("選定帳戶後，每筆支出會扣減現金帳戶餘額或增加信用卡結欠；不指定則計入未歸屬現金結餘。")
                 }
             }
 
@@ -961,13 +1021,11 @@ struct ExpenseImportView: View {
 
     private func performImport() {
         guard let result, result.validCount > 0 else { return }
-        let transactions = result.validTransactions.map { tx -> Transaction in
-            var copy = tx
-            copy.accountId = accountId
-            return copy
-        }
-        persistence.addTransactions(transactions)
-        importedCount = transactions.count
+        importedCount = persistence.addImportedTransactions(
+            result.validTransactions,
+            accountId: accountId,
+            asHistorical: isHistoricalExpense
+        )
         showingImportDone = true
     }
 }

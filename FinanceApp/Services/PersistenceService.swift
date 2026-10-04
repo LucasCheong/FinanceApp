@@ -20,6 +20,7 @@ final class PersistenceService: ObservableObject {
     private let priceAlertsFile = "price_alerts.json"
     private let dcaFile = "dca_positions.json"
     private let accountsFile = "accounts.json"
+    private let lastImportBatchKey = "lastExpenseImportBatchId"
 
     // 發布的數據
     @Published var transactions: [Transaction] = []
@@ -37,6 +38,7 @@ final class PersistenceService: ObservableObject {
     @Published var priceAlerts: [PriceAlert] = []
     @Published var dcaPositions: [DCAPosition] = []
     @Published var accounts: [Account] = []
+    @Published private(set) var lastImportBatchId: UUID?
 
     private init() {
         documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -365,7 +367,7 @@ final class PersistenceService: ObservableObject {
         updateWidgetSnapshot()
     }
 
-    /// 批次新增交易（CSV / XLSX 匯入用）：一次存檔、一次更新小組件，避免逐筆 I/O
+    /// 批次新增交易：一次存檔、一次更新小組件，避免逐筆 I/O
     func addTransactions(_ newOnes: [Transaction]) {
         guard !newOnes.isEmpty else { return }
         transactions.insert(contentsOf: newOnes, at: 0)
@@ -374,14 +376,69 @@ final class PersistenceService: ObservableObject {
         updateWidgetSnapshot()
     }
 
+    /// 新增一批 CSV / XLSX 支出，並記錄批次以供使用者快速回溯。
+    @discardableResult
+    func addImportedTransactions(
+        _ newOnes: [Transaction],
+        accountId: UUID?,
+        asHistorical: Bool
+    ) -> Int {
+        guard !newOnes.isEmpty else { return 0 }
+        let batchId = UUID()
+        let imported = newOnes.map { transaction -> Transaction in
+            var copy = transaction
+            copy.source = .imported
+            copy.accountId = asHistorical ? nil : accountId
+            copy.transferToAccountId = nil
+            copy.importBatchId = batchId
+            copy.isHistoricalExpense = asHistorical ? true : nil
+            return copy
+        }
+        transactions.insert(contentsOf: imported, at: 0)
+        setLastImportBatchId(batchId)
+        saveTransactions()
+        Haptics.success()
+        updateWidgetSnapshot()
+        return imported.count
+    }
+
+    /// 最近一次仍可回溯的 CSV / XLSX 匯入交易。
+    var lastImportedTransactions: [Transaction] {
+        guard let batchId = lastImportBatchId else { return [] }
+        return transactions.filter {
+            $0.source == .imported && $0.importBatchId == batchId
+        }
+    }
+
+    /// 刪除最近一次匯入；只匹配該批次，不會刪除手動、發票或其他匯入。
+    @discardableResult
+    func deleteLastImportBatch() -> Int {
+        guard let batchId = lastImportBatchId else { return 0 }
+        let oldCount = transactions.count
+        transactions.removeAll {
+            $0.source == .imported && $0.importBatchId == batchId
+        }
+        let deletedCount = oldCount - transactions.count
+        setLastImportBatchId(nil)
+        if deletedCount > 0 {
+            saveTransactions()
+            Haptics.warning()
+            updateWidgetSnapshot()
+        }
+        return deletedCount
+    }
+
     func deleteTransaction(at indexSet: IndexSet) {
         transactions.remove(atOffsets: indexSet)
+        reconcileLastImportBatch()
         saveTransactions()
+        updateWidgetSnapshot()
     }
 
     /// 依 id 刪除一筆交易（卡片式列表用）
     func deleteTransaction(_ transaction: Transaction) {
         transactions.removeAll { $0.id == transaction.id }
+        reconcileLastImportBatch()
         saveTransactions()
         Haptics.warning()
         updateWidgetSnapshot()
@@ -557,6 +614,9 @@ final class PersistenceService: ObservableObject {
         transactions.reduce(0.0) { total, tx in
             let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: currency)
 
+            // 歷史匯入只供統計，不得影響任何帳戶餘額
+            guard tx.isHistoricalExpense != true else { return total }
+
             // 轉帳：從來源帳戶扣除、轉入目標帳戶
             if tx.type == .transfer {
                 if tx.accountId == accountId {
@@ -576,7 +636,10 @@ final class PersistenceService: ObservableObject {
     /// 尚未歸屬到任何帳戶的記帳淨額（基準幣種）
     var unassignedCashFlow: Double {
         transactions.reduce(0.0) { total, tx in
-            guard tx.accountId == nil, tx.type != .transfer else { return total }
+            guard tx.accountId == nil,
+                  tx.type != .transfer,
+                  tx.isHistoricalExpense != true
+            else { return total }
             let amount = ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
             return tx.type == .income ? total + amount : total - amount
         }
@@ -584,7 +647,11 @@ final class PersistenceService: ObservableObject {
 
     /// 未歸屬帳戶的交易筆數
     var unassignedTransactionCount: Int {
-        transactions.filter { $0.accountId == nil && $0.type != .transfer }.count
+        transactions.filter {
+            $0.accountId == nil
+                && $0.type != .transfer
+                && $0.isHistoricalExpense != true
+        }.count
     }
 
     /// 把所有未歸屬的交易一次歸入指定帳戶
@@ -592,7 +659,9 @@ final class PersistenceService: ObservableObject {
         var updated = transactions
         var touched = false
         for index in updated.indices
-        where updated[index].accountId == nil && updated[index].type != .transfer {
+        where updated[index].accountId == nil
+            && updated[index].type != .transfer
+            && updated[index].isHistoricalExpense != true {
             updated[index].accountId = accountId
             touched = true
         }
@@ -795,10 +864,20 @@ final class PersistenceService: ObservableObject {
 
     /// 現金結餘（基準幣種）
     ///
-    /// 已建立帳戶時以帳戶餘額為準，再加上尚未歸屬到任何帳戶的記帳淨額，
-    /// 避免舊交易的金額在建帳戶後憑空消失。完全沒建帳戶時沿用原本的記帳淨額。
+    /// 已建立帳戶時以帳戶餘額為準，再加上尚未歸屬到任何帳戶的記帳淨額；
+    /// 沒有啟用帳戶時沿用所有一般收支淨額。歷史匯入不影響兩種情況。
     var cashBalance: Double {
-        guard hasAccounts else { return totalIncome - totalExpense }
+        guard hasAccounts else {
+            return transactions.reduce(0.0) { total, tx in
+                guard tx.type != .transfer, tx.isHistoricalExpense != true else { return total }
+                let amount = ExchangeRateProvider.convert(
+                    tx.amount,
+                    from: tx.currency,
+                    to: baseCurrency
+                )
+                return tx.type == .income ? total + amount : total - amount
+            }
+        }
         return totalCashAccountBalance + unassignedCashFlow
     }
 
@@ -843,7 +922,8 @@ final class PersistenceService: ObservableObject {
     var cashBalanceByCurrency: [Currency: Double] {
         var incomeByCurrency: [Currency: Double] = [:]
         var expenseByCurrency: [Currency: Double] = [:]
-        for tx in transactions {
+        for tx in transactions
+        where tx.type != .transfer && tx.isHistoricalExpense != true {
             if tx.type == .income {
                 incomeByCurrency[tx.currency, default: 0] += tx.amount
             } else {
@@ -933,6 +1013,10 @@ final class PersistenceService: ObservableObject {
         }
 
         transactions = load(transactionsFile) ?? []
+        if let rawBatchId = UserDefaults.standard.string(forKey: lastImportBatchKey) {
+            lastImportBatchId = UUID(uuidString: rawBatchId)
+        }
+        reconcileLastImportBatch()
         let rawHoldings: [StockHolding] = load(holdingsFile) ?? []
         holdings = mergeHoldingsBySymbol(rawHoldings)
         // 舊版資料同一 symbol 可能有多筆，合併後立即寫回以免每次載入都重跞
@@ -946,6 +1030,31 @@ final class PersistenceService: ObservableObject {
         priceAlerts = load(priceAlertsFile) ?? []
         dcaPositions = load(dcaFile) ?? []
         accounts = load(accountsFile) ?? []
+    }
+
+    private func setLastImportBatchId(_ batchId: UUID?) {
+        lastImportBatchId = batchId
+        if let batchId {
+            UserDefaults.standard.set(batchId.uuidString, forKey: lastImportBatchKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: lastImportBatchKey)
+        }
+    }
+
+    private func reconcileLastImportBatch() {
+        guard let batchId = lastImportBatchId else { return }
+        let stillExists = transactions.contains {
+            $0.source == .imported && $0.importBatchId == batchId
+        }
+        if !stillExists { setLastImportBatchId(nil) }
+    }
+
+    /// 備份保留交易陣列順序，因此第一筆帶批次 ID 的匯入交易屬於最近一次匯入。
+    private func restoreLastImportBatchFromTransactionOrder() {
+        let batchId = transactions.first {
+            $0.source == .imported && $0.importBatchId != nil
+        }?.importBatchId
+        setLastImportBatchId(batchId)
     }
 
     /// 將同一 symbol 的多筆持倉合併為單一筆（保留各自的批次）。舊版 JSON 遷移用
@@ -1072,6 +1181,7 @@ final class PersistenceService: ObservableObject {
         priceAlerts = decode("priceAlerts")
         dcaPositions = decode("dcaPositions")
         accounts = decode("accounts")
+        restoreLastImportBatchFromTransactionOrder()
 
         if let code = json["baseCurrency"] as? String, let cur = Currency(rawValue: code) {
             baseCurrency = cur
