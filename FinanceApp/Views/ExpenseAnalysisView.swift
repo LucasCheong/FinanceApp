@@ -6,7 +6,10 @@ struct ExpenseAnalysisView: View {
     @StateObject private var persistence = PersistenceService.shared
     @Environment(\.dismiss) private var dismiss
 
+    @State private var selectedPeriod: AnalysisPeriod = .month
     @State private var selectedYear: Int = Calendar.current.component(.year, from: Date())
+    @State private var selectedMonth: Int = Calendar.current.component(.month, from: Date())
+    @State private var selectedQuarter: Int = ((Calendar.current.component(.month, from: Date()) - 1) / 3) + 1
     @State private var showingAddCategory = false
 
     var availableYears: [Int] {
@@ -19,25 +22,58 @@ struct ExpenseAnalysisView: View {
         }
     }
 
-    var yearlyOverview: YearlyExpenseOverview {
-        persistence.yearlyExpenseOverview(for: selectedYear)
+    /// 當前時段的支出總覽
+    var currentOverview: PeriodExpenseOverview {
+        switch selectedPeriod {
+        case .month:
+            return persistence.monthlyExpenseOverview(year: selectedYear, month: selectedMonth)
+        case .quarter:
+            return persistence.quarterlyExpenseOverview(year: selectedYear, quarter: selectedQuarter)
+        case .year:
+            return persistence.yearlyPeriodOverview(for: selectedYear)
+        }
+    }
+
+    /// 上一期標籤
+    var previousPeriodLabel: String {
+        switch selectedPeriod {
+        case .month:
+            let pm = selectedMonth == 1 ? 12 : selectedMonth - 1
+            let py = selectedMonth == 1 ? selectedYear - 1 : selectedYear
+            return "\(py)年\(pm)月"
+        case .quarter:
+            let pq = selectedQuarter == 1 ? 4 : selectedQuarter - 1
+            let py = selectedQuarter == 1 ? selectedYear - 1 : selectedYear
+            return "\(py)年Q\(pq)"
+        case .year:
+            return "\(selectedYear - 1)年"
+        }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    // 時段切換
+                    periodPicker
+
                     // 年份選擇器
                     yearPicker
 
-                    // 年度總覽卡片
-                    yearlySummaryCard
+                    // 月份或季度選擇器
+                    subPeriodPicker
+
+                    // 總覽卡片
+                    summaryCard
+
+                    // 趨勢圖
+                    trendChart
 
                     // 各類別支出柱狀圖
                     categoryBarChart
 
-                    // 同比增長分析
-                    yoyAnalysisCard
+                    // 環比/同比增長分析
+                    growthAnalysisCard
 
                     // 各類別明細列表
                     categoryDetailList
@@ -67,6 +103,16 @@ struct ExpenseAnalysisView: View {
         }
     }
 
+    // MARK: - 時段切換 (月/季/年)
+    private var periodPicker: some View {
+        Picker("分析維度", selection: $selectedPeriod) {
+            ForEach(AnalysisPeriod.allCases, id: \.self) { period in
+                Text(period.rawValue).tag(period)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
     // MARK: - 年份選擇器
     private var yearPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -88,48 +134,109 @@ struct ExpenseAnalysisView: View {
         }
     }
 
-    // MARK: - 年度總覽卡片
-    private var yearlySummaryCard: some View {
-        VStack(spacing: 12) {
-            Text("\(String(selectedYear)) 年度總覽")
+    // MARK: - 月份或季度選擇器
+    @ViewBuilder
+    private var subPeriodPicker: some View {
+        if selectedPeriod == .month {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(1...12, id: \.self) { month in
+                        Button {
+                            selectedMonth = month
+                        } label: {
+                            Text("\(month)月")
+                                .font(.subheadline)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selectedMonth == month ? Color.financePrimary : Color.cardBackground)
+                                .foregroundStyle(selectedMonth == month ? .white : .primary)
+                                .cornerRadius(16)
+                        }
+                    }
+                }
+            }
+        } else if selectedPeriod == .quarter {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(1...4, id: \.self) { q in
+                        Button {
+                            selectedQuarter = q
+                        } label: {
+                            Text("Q\(q)")
+                                .font(.headline)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(selectedQuarter == q ? Color.financePrimary : Color.cardBackground)
+                                .foregroundStyle(selectedQuarter == q ? .white : .primary)
+                                .cornerRadius(20)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 總覽卡片
+    private var summaryCard: some View {
+        let overview = currentOverview
+        return VStack(spacing: 12) {
+            Text(overview.periodLabel)
                 .font(.headline)
 
-            HStack(spacing: 24) {
+            // 支出 / 收入
+            HStack(spacing: 20) {
                 VStack {
-                    Text("年度支出")
+                    Text("總支出")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(yearlyOverview.totalExpense.moneyString(currency: persistence.baseCurrency))
+                    Text(overview.totalExpense.moneyString(currency: persistence.baseCurrency))
                         .font(.title2.bold())
                         .foregroundStyle(.expenseColor)
                 }
-
                 VStack {
-                    Text("年度收入")
+                    Text("總收入")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(yearlyOverview.totalIncome.moneyString(currency: persistence.baseCurrency))
+                    Text(overview.totalIncome.moneyString(currency: persistence.baseCurrency))
                         .font(.title2.bold())
                         .foregroundStyle(.incomeColor)
                 }
             }
 
-            // 同比變化
-            if yearlyOverview.previousYearExpense > 0 {
+            // 日均支出 + 交易筆數
+            HStack(spacing: 20) {
+                VStack {
+                    Text("日均支出")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(overview.dailyAverageExpense.moneyString(currency: persistence.baseCurrency))
+                        .font(.subheadline.bold())
+                }
+                VStack {
+                    Text("交易筆數")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(overview.transactionCount) 筆")
+                        .font(.subheadline.bold())
+                }
+            }
+
+            // 環比/同比變化
+            if overview.previousPeriodExpense > 0 {
                 Divider()
                 HStack {
-                    Image(systemName: yearlyOverview.yoyChange >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                        .foregroundStyle(yearlyOverview.yoyChange >= 0 ? .expenseColor : .incomeColor)
-                    Text("vs \(String(selectedYear - 1)) 年")
+                    Image(systemName: overview.change >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                        .foregroundStyle(overview.change >= 0 ? .expenseColor : .incomeColor)
+                    Text("vs \(previousPeriodLabel)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(yearlyOverview.yoyChange >= 0 ? "+" : "")\(yearlyOverview.yoyChange.moneyString(currency: persistence.baseCurrency))")
+                    Text("\(overview.change >= 0 ? "+" : "")\(overview.change.moneyString(currency: persistence.baseCurrency))")
                         .font(.subheadline.bold())
-                        .foregroundStyle(yearlyOverview.yoyChange >= 0 ? .expenseColor : .incomeColor)
-                    Text("(\(String(format: "%+.1f%%", yearlyOverview.yoyPercent)))")
+                        .foregroundStyle(overview.change >= 0 ? .expenseColor : .incomeColor)
+                    Text("(\(String(format: "%+.1f%%", overview.changePercent)))")
                         .font(.caption)
-                        .foregroundStyle(yearlyOverview.yoyChange >= 0 ? .expenseColor : .incomeColor)
+                        .foregroundStyle(overview.change >= 0 ? .expenseColor : .incomeColor)
                 }
             }
         }
@@ -137,57 +244,150 @@ struct ExpenseAnalysisView: View {
         .cardStyle()
     }
 
+    // MARK: - 趨勢圖
+    private var trendChart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch selectedPeriod {
+            case .year, .month:
+                Text("\(String(selectedYear)) 年月度趨勢")
+                    .font(.headline)
+                let trend = persistence.monthlyExpenseTrend(forYear: selectedYear)
+                let hasData = trend.contains { $0.totalExpense > 0 }
+                if hasData {
+                    Chart(trend) { item in
+                        LineMark(
+                            x: .value("月", item.monthLabel),
+                            y: .value("支出", item.totalExpense)
+                        )
+                        .foregroundStyle(Color.expenseColor)
+                        .interpolationMethod(.catmullRom)
+
+                        AreaMark(
+                            x: .value("月", item.monthLabel),
+                            y: .value("支出", item.totalExpense)
+                        )
+                        .foregroundStyle(
+                            .linearGradient(
+                                colors: [Color.expenseColor.opacity(0.3), Color.expenseColor.opacity(0.05)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .interpolationMethod(.catmullRom)
+
+                        if selectedPeriod == .month && item.month == selectedMonth {
+                            PointMark(
+                                x: .value("月", item.monthLabel),
+                                y: .value("支出", item.totalExpense)
+                            )
+                            .foregroundStyle(Color.financePrimary)
+                            .symbolSize(80)
+                        }
+                    }
+                    .chartYAxisLabel(persistence.baseCurrency.symbol)
+                    .frame(height: 200)
+                } else {
+                    emptyChartPlaceholder
+                }
+
+            case .quarter:
+                Text("\(String(selectedYear)) 年季度對比")
+                    .font(.headline)
+                let quarters = persistence.quarterlyExpenseSummaries(forYear: selectedYear)
+                let hasData = quarters.contains { $0.totalExpense > 0 }
+                if hasData {
+                    Chart(quarters) { item in
+                        BarMark(
+                            x: .value("季度", "Q\(item.month)"),
+                            y: .value("支出", item.totalExpense)
+                        )
+                        .foregroundStyle(item.month == selectedQuarter ? Color.financePrimary : Color.financePrimary.opacity(0.4))
+                        .annotation(position: .top) {
+                            Text(item.totalExpense.compactString())
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .chartYAxisLabel(persistence.baseCurrency.symbol)
+                    .frame(height: 200)
+                } else {
+                    emptyChartPlaceholder
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private var emptyChartPlaceholder: some View {
+        Text("暫無數據")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 40)
+    }
+
     // MARK: - 各類別支出柱狀圖
     private var categoryBarChart: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let overview = currentOverview
+        return VStack(alignment: .leading, spacing: 8) {
             Text("各類別支出")
                 .font(.headline)
 
-            if yearlyOverview.categories.isEmpty {
-                Text("本年度暫無支出記錄")
+            if overview.categories.isEmpty {
+                Text("暫無支出記錄")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 40)
             } else {
-                Chart(yearlyOverview.categories) { stat in
+                Chart(overview.categories) { stat in
                     BarMark(
                         x: .value("金額", stat.amount),
                         y: .value("類別", stat.category)
                     )
                     .foregroundStyle(by: .value("類別", stat.category))
                     .annotation(position: .trailing) {
-                        Text(stat.amount.compactString())
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(stat.amount.compactString())
+                            Text("(\(String(format: "%.0f%%", stat.percentage(of: overview.totalExpense))))")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                 }
                 .chartXAxisLabel("金額 (\(persistence.baseCurrency.symbol))")
-                .frame(height: CGFloat(max(yearlyOverview.categories.count * 40, 200)))
+                .frame(height: CGFloat(max(overview.categories.count * 40, 200)))
                 .chartLegend(.hidden)
             }
         }
         .cardStyle()
     }
 
-    // MARK: - 同比增長分析
-    private var yoyAnalysisCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("同比增長分析")
+    // MARK: - 環比/同比增長分析
+    private var growthAnalysisCard: some View {
+        let overview = currentOverview
+        let compLabel: String = {
+            switch selectedPeriod {
+            case .month: return "環比分析"
+            case .quarter: return "環比分析"
+            case .year: return "同比分析"
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(compLabel)
                 .font(.headline)
 
-            Text("與 \(String(selectedYear - 1)) 年對比")
+            Text("vs \(previousPeriodLabel)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            let changes = yearlyOverview.categories.filter { $0.previousYearAmount > 0 || $0.amount > 0 }
+            let changes = overview.categories.filter { $0.previousPeriodAmount > 0 || $0.amount > 0 }
             if changes.isEmpty {
                 Text("暫無對比數據")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 20)
             } else {
-                ForEach(changes.filter { $0.yoyChange != 0 || $0.isNewCategory }) { stat in
+                ForEach(changes.filter { $0.change != 0 || $0.isNewCategory }) { stat in
                     HStack(spacing: 12) {
                         Image(systemName: stat.icon)
                             .frame(width: 28)
@@ -213,12 +413,12 @@ struct ExpenseAnalysisView: View {
                                 .cornerRadius(6)
                         } else {
                             VStack(alignment: .trailing) {
-                                Text("\(stat.yoyChange >= 0 ? "+" : "")\(stat.yoyChange.moneyString(currency: persistence.baseCurrency))")
+                                Text("\(stat.change >= 0 ? "+" : "")\(stat.change.moneyString(currency: persistence.baseCurrency))")
                                     .font(.subheadline.bold())
-                                    .foregroundStyle(stat.yoyChange >= 0 ? .expenseColor : .incomeColor)
-                                Text(String(format: "%+.1f%%", stat.yoyPercent))
+                                    .foregroundStyle(stat.change >= 0 ? .expenseColor : .incomeColor)
+                                Text(String(format: "%+.1f%%", stat.changePercent))
                                     .font(.caption2)
-                                    .foregroundStyle(stat.yoyChange >= 0 ? .expenseColor : .incomeColor)
+                                    .foregroundStyle(stat.change >= 0 ? .expenseColor : .incomeColor)
                             }
                         }
                     }
@@ -231,17 +431,18 @@ struct ExpenseAnalysisView: View {
 
     // MARK: - 各類別明細列表
     private var categoryDetailList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let overview = currentOverview
+        return VStack(alignment: .leading, spacing: 8) {
             Text("類別明細")
                 .font(.headline)
 
-            if yearlyOverview.categories.isEmpty {
-                Text("本年度暫無支出記錄")
+            if overview.categories.isEmpty {
+                Text("暫無支出記錄")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 20)
             } else {
-                ForEach(yearlyOverview.categories) { stat in
+                ForEach(overview.categories) { stat in
                     HStack(spacing: 12) {
                         Image(systemName: stat.icon)
                             .frame(width: 28)
@@ -260,11 +461,14 @@ struct ExpenseAnalysisView: View {
                         VStack(alignment: .trailing) {
                             Text(stat.amount.moneyString(currency: persistence.baseCurrency))
                                 .font(.subheadline.bold())
-                            if stat.previousYearAmount > 0 {
-                                Text("去年: \(stat.previousYearAmount.compactString())")
+                            if stat.previousPeriodAmount > 0 {
+                                Text("上期: \(stat.previousPeriodAmount.compactString())")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
+                            Text(String(format: "%.1f%%", stat.percentage(of: overview.totalExpense)))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                     .padding(.vertical, 6)

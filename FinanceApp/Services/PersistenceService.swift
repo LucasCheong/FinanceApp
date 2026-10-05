@@ -339,6 +339,180 @@ final class PersistenceService: ObservableObject {
         )
     }
 
+    // MARK: - 月度支出趨勢（指定年份的12個月）
+    func monthlyExpenseTrend(forYear year: Int) -> [MonthExpenseSummary] {
+        let calendar = Calendar.current
+        return (1...12).map { month in
+            let monthTxs = transactions.filter {
+                calendar.component(.year, from: $0.date) == year &&
+                calendar.component(.month, from: $0.date) == month
+            }
+            let expense = monthTxs.filter { $0.type == .expense }
+                .reduce(0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+            let income = monthTxs.filter { $0.type == .income }
+                .reduce(0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+            return MonthExpenseSummary(
+                year: year, month: month,
+                totalExpense: expense, totalIncome: income,
+                transactionCount: monthTxs.count
+            )
+        }
+    }
+
+    // MARK: - 通用時段支出統計（月/季/年）
+
+    /// 取得月度支出總覽
+    func monthlyExpenseOverview(year: Int, month: Int) -> PeriodExpenseOverview {
+        let calendar = Calendar.current
+        let prevMonth = month == 1 ? 12 : month - 1
+        let prevYear = month == 1 ? year - 1 : year
+
+        let (expense, income, count) = periodAggregate(year: year, months: [month])
+        let (prevExpense, _, _) = periodAggregate(year: prevYear, months: [prevMonth])
+        let categories = periodCategoryStats(
+            year: year, months: [month],
+            periodKey: String(format: "%d-%02d", year, month),
+            prevYear: prevYear, prevMonths: [prevMonth]
+        )
+
+        // 天數
+        let comp = DateComponents(year: year, month: month)
+        let days = Double(calendar.range(of: .day, in: .month,
+            for: calendar.date(from: comp) ?? Date())?.count ?? 30)
+
+        return PeriodExpenseOverview(
+            periodKey: String(format: "%d-%02d", year, month),
+            periodLabel: "\(year)年\(month)月",
+            totalExpense: expense, totalIncome: income,
+            categories: categories,
+            transactionCount: count,
+            dailyAverageExpense: days > 0 ? expense / days : 0
+        )
+    }
+
+    /// 取得季度支出總覽
+    func quarterlyExpenseOverview(year: Int, quarter: Int) -> PeriodExpenseOverview {
+        let months = quarterMonths(quarter)
+        let prevQuarter = quarter == 1 ? 4 : quarter - 1
+        let prevYear = quarter == 1 ? year - 1 : year
+        let prevMs = quarterMonths(prevQuarter)
+
+        let (expense, income, count) = periodAggregate(year: year, months: months)
+        let categories = periodCategoryStats(
+            year: year, months: months,
+            periodKey: "\(year)-Q\(quarter)",
+            prevYear: prevYear, prevMonths: prevMs
+        )
+
+        return PeriodExpenseOverview(
+            periodKey: "\(year)-Q\(quarter)",
+            periodLabel: "\(year)年Q\(quarter)",
+            totalExpense: expense, totalIncome: income,
+            categories: categories,
+            transactionCount: count,
+            dailyAverageExpense: expense / Double(daysInMonths(year: year, months: months))
+        )
+    }
+
+    /// 取得年度支出總覽（基於新模型）
+    func yearlyPeriodOverview(for year: Int) -> PeriodExpenseOverview {
+        let months = Array(1...12)
+        let categories = periodCategoryStats(
+            year: year, months: months,
+            periodKey: "\(year)",
+            prevYear: year - 1, prevMonths: months
+        )
+        let (expense, income, count) = periodAggregate(year: year, months: months)
+
+        return PeriodExpenseOverview(
+            periodKey: "\(year)",
+            periodLabel: "\(year)年",
+            totalExpense: expense, totalIncome: income,
+            categories: categories,
+            transactionCount: count,
+            dailyAverageExpense: expense / Double(daysInMonths(year: year, months: months))
+        )
+    }
+
+    /// 取得指定年份的季度支出摘要（用於季度對比圖）
+    func quarterlyExpenseSummaries(forYear year: Int) -> [MonthExpenseSummary] {
+        (1...4).map { q in
+            let months = quarterMonths(q)
+            let (expense, income, count) = periodAggregate(year: year, months: months)
+            return MonthExpenseSummary(
+                year: year, month: q,  // month 欄位存放季度號
+                totalExpense: expense, totalIncome: income,
+                transactionCount: count
+            )
+        }
+    }
+
+    // MARK: 私有輔助方法
+
+    private func quarterMonths(_ quarter: Int) -> [Int] {
+        let start = (quarter - 1) * 3 + 1
+        return Array(start...(start + 2))
+    }
+
+    private func daysInMonths(year: Int, months: [Int]) -> Int {
+        let calendar = Calendar.current
+        return months.reduce(0) { total, m in
+            let comp = DateComponents(year: year, month: m)
+            let days = calendar.range(of: .day, in: .month,
+                for: calendar.date(from: comp) ?? Date())?.count ?? 30
+            return total + days
+        }
+    }
+
+    private func periodAggregate(year: Int, months: [Int]) -> (expense: Double, income: Double, count: Int) {
+        let calendar = Calendar.current
+        let txs = transactions.filter {
+            calendar.component(.year, from: $0.date) == year &&
+            months.contains(calendar.component(.month, from: $0.date))
+        }
+        let expense = txs.filter { $0.type == .expense }
+            .reduce(0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+        let income = txs.filter { $0.type == .income }
+            .reduce(0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+        return (expense, income, txs.count)
+    }
+
+    private func periodCategoryStats(
+        year: Int, months: [Int], periodKey: String,
+        prevYear: Int, prevMonths: [Int]
+    ) -> [CategoryPeriodStats] {
+        let calendar = Calendar.current
+
+        let currentTxs = transactions.filter {
+            $0.type == .expense &&
+            calendar.component(.year, from: $0.date) == year &&
+            months.contains(calendar.component(.month, from: $0.date))
+        }
+        let prevTxs = transactions.filter {
+            $0.type == .expense &&
+            calendar.component(.year, from: $0.date) == prevYear &&
+            prevMonths.contains(calendar.component(.month, from: $0.date))
+        }
+
+        let allCats = Set(currentTxs.map { $0.category }).union(Set(prevTxs.map { $0.category }))
+
+        return allCats.compactMap { cat in
+            let curAmt = currentTxs.filter { $0.category == cat }
+                .reduce(0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+            let prevAmt = prevTxs.filter { $0.category == cat }
+                .reduce(0) { $0 + ExchangeRateProvider.convert($1.amount, from: $1.currency, to: baseCurrency) }
+            guard curAmt > 0 || prevAmt > 0 else { return nil }
+            return CategoryPeriodStats(
+                category: cat,
+                icon: categoryIcon(for: cat, type: .expense),
+                periodKey: periodKey,
+                amount: curAmt,
+                transactionCount: currentTxs.filter { $0.category == cat }.count,
+                previousPeriodAmount: prevAmt
+            )
+        }.sorted { $0.amount > $1.amount }
+    }
+
     // MARK: - 交易記錄
     func addTransaction(_ transaction: Transaction) {
         transactions.insert(transaction, at: 0)

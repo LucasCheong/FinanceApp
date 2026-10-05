@@ -629,6 +629,90 @@ struct YearlyExpenseOverview: Identifiable {
     }
 }
 
+// MARK: - 支出分析時段枚舉
+enum AnalysisPeriod: String, CaseIterable {
+    case month = "月"
+    case quarter = "季"
+    case year = "年"
+}
+
+// MARK: - 月度支出摘要（趨勢圖數據點）
+struct MonthExpenseSummary: Identifiable {
+    var id: String { "\(year)-\(month)" }
+    let year: Int
+    let month: Int
+    let totalExpense: Double
+    let totalIncome: Double
+    let transactionCount: Int
+
+    var monthLabel: String {
+        "\(month)月"
+    }
+
+    var dailyAverageExpense: Double {
+        let calendar = Calendar.current
+        let components = DateComponents(year: year, month: month)
+        guard let date = calendar.date(from: components),
+              let range = calendar.range(of: .day, in: .month, for: date) else {
+            return totalExpense / 30
+        }
+        return totalExpense / Double(range.count)
+    }
+}
+
+// MARK: - 通用類別支出統計（支援月/季/年）
+struct CategoryPeriodStats: Identifiable {
+    var id: String { "\(category)-\(periodKey)" }
+    let category: String
+    let icon: String
+    let periodKey: String     // e.g. "2026", "2026-Q1", "2026-03"
+    let amount: Double
+    let transactionCount: Int
+    let previousPeriodAmount: Double
+
+    /// 環比/同比增長金額
+    var change: Double { amount - previousPeriodAmount }
+
+    /// 環比/同比增長百分比
+    var changePercent: Double {
+        guard previousPeriodAmount > 0 else { return 0 }
+        return (change / previousPeriodAmount) * 100
+    }
+
+    var isNewCategory: Bool {
+        previousPeriodAmount == 0 && amount > 0
+    }
+
+    /// 佔總支出百分比
+    func percentage(of total: Double) -> Double {
+        guard total > 0 else { return 0 }
+        return (amount / total) * 100
+    }
+}
+
+// MARK: - 時段支出總覽（支援月/季/年）
+struct PeriodExpenseOverview: Identifiable {
+    var id: String { periodKey }
+    let periodKey: String
+    let periodLabel: String   // e.g. "2026年", "2026年Q1", "2026年3月"
+    let totalExpense: Double
+    let totalIncome: Double
+    let categories: [CategoryPeriodStats]
+    let transactionCount: Int
+    let dailyAverageExpense: Double
+
+    var previousPeriodExpense: Double {
+        categories.reduce(0) { $0 + $1.previousPeriodAmount }
+    }
+
+    var change: Double { totalExpense - previousPeriodExpense }
+
+    var changePercent: Double {
+        guard previousPeriodExpense > 0 else { return 0 }
+        return (change / previousPeriodExpense) * 100
+    }
+}
+
 // MARK: - 均線技術信號模型
 struct MovingAverageSignal: Identifiable {
     var id: String { symbol }
