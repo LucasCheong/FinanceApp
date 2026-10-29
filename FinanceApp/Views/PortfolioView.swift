@@ -10,6 +10,7 @@ struct PortfolioView: View {
     @State private var currentQuotes: [String: StockQuote] = [:]
     @State private var showingAssetAllocation = false
     @State private var expandedHoldings: Set<UUID> = []
+    @State private var sellingHolding: StockHolding?
 
     // 計算總股票市值（轉換為基準幣種）
     var totalStockValue: Double {
@@ -113,6 +114,9 @@ struct PortfolioView: View {
             .sheet(isPresented: $showingAssetAllocation) {
                 AssetAllocationView()
             }
+            .sheet(item: $sellingHolding) { holding in
+                SellHoldingView(holding: holding, quote: currentQuotes[holding.symbol])
+            }
             .task {
                 await refreshPrices()
             }
@@ -126,41 +130,52 @@ struct PortfolioView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(totalWealth.moneyString(currency: persistence.baseCurrency))
+            Text(totalWealth.amountString())
                 .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(.financePrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
 
             Text("基準幣種: \(persistence.baseCurrency.displayName)")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
-            HStack(spacing: 24) {
+            HStack(spacing: 12) {
                 VStack {
                     Text("今日變動")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("\(todayChange >= 0 ? "+" : "")\(todayChange.moneyString(currency: persistence.baseCurrency))")
-                        .font(.headline)
+                    Text("\(todayChange >= 0 ? "+" : "")\(todayChange.amountString())")
+                        .font(.subheadline.bold())
                         .foregroundStyle(Color.changeColor(todayChange))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
+                .frame(maxWidth: .infinity)
 
                 VStack {
                     Text("總盈虧")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("\(totalPnL >= 0 ? "+" : "")\(totalPnL.moneyString(currency: persistence.baseCurrency))")
-                        .font(.headline)
+                    Text("\(totalPnL >= 0 ? "+" : "")\(totalPnL.amountString())")
+                        .font(.subheadline.bold())
                         .foregroundStyle(Color.changeColor(totalPnL))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
+                .frame(maxWidth: .infinity)
 
                 VStack {
                     Text("回報率")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(String(format: "%+.2f%%", totalPnLPercent))
-                        .font(.headline)
+                        .font(.subheadline.bold())
                         .foregroundStyle(Color.changeColor(totalPnL))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
+                .frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity)
@@ -209,23 +224,51 @@ struct PortfolioView: View {
 
     // MARK: - 持倉概覽
     private var portfolioSummaryCard: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text("持倉市值")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(totalStockValue.moneyString(currency: persistence.baseCurrency))
-                    .font(.title3.bold())
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("持倉市值")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(totalStockValue.amountString())
+                        .font(.title3.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing) {
+                    Text("投資成本")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(totalCost.amountString())
+                        .font(.title3.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
             }
 
-            Spacer()
+            if !persistence.stockSales.isEmpty {
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("已實現盈虧")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("累計 \(persistence.stockSales.count) 筆賣出")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
 
-            VStack(alignment: .trailing) {
-                Text("投資成本")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(totalCost.moneyString(currency: persistence.baseCurrency))
-                    .font(.title3.bold())
+                    Spacer()
+
+                    Text("\(persistence.realizedPnLTotal >= 0 ? "+" : "")\(persistence.realizedPnLTotal.amountString())")
+                        .font(.headline)
+                        .foregroundStyle(Color.changeColor(persistence.realizedPnLTotal))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
         }
         .cardStyle()
@@ -255,6 +298,29 @@ struct PortfolioView: View {
                         }
                     }
 
+                    HStack {
+                        Button {
+                            sellingHolding = holding
+                        } label: {
+                            Label("賣出", systemImage: "arrow.up.right.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption.bold())
+                        .foregroundStyle(.financePrimary)
+
+                        Spacer()
+
+                        if holding.lots.count > 1 {
+                            Text(expandedHoldings.contains(holding.id)
+                                 ? "收起批次"
+                                 : "共 \(holding.lots.count) 個批次")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 10)
+
                     if expandedHoldings.contains(holding.id) {
                         Divider().padding(.horizontal)
 
@@ -275,6 +341,11 @@ struct PortfolioView: View {
                 .background(Color.cardBackground)
                 .cornerRadius(10)
                 .contextMenu {
+                    Button {
+                        sellingHolding = holding
+                    } label: {
+                        Label("賣出", systemImage: "arrow.up.right.circle")
+                    }
                     Button(role: .destructive) {
                         persistence.deleteHolding(holding)
                     } label: {
@@ -405,6 +476,10 @@ struct HoldingRow: View {
         costValue > 0 ? (pnl / costValue) * 100 : 0
     }
 
+    private var currency: Currency {
+        Currency.from(market: holding.market)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -434,18 +509,15 @@ struct HoldingRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(currentValue.moneyString(currency: Currency.from(market: holding.market)))
+                Text(currentValue.moneyString(currency: currency))
                     .font(.subheadline.bold())
-                HStack(spacing: 2) {
-                    Image(systemName: pnl >= 0 ? "arrow.up" : "arrow.down")
-                        .font(.caption2)
-                    Text(String(format: "%+.2f%%", pnlPercent))
-                        .font(.caption.bold())
-                }
-                .foregroundStyle(Color.changeColor(pnl))
-                Text("\(pnl >= 0 ? "+" : "")\(pnl.moneyString(currency: Currency.from(market: holding.market)))")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text("\(pnl >= 0 ? "+" : "")\(pnl.moneyString(currency: currency))  \(String(format: "%+.2f%%", pnlPercent))")
                     .font(.caption2)
                     .foregroundStyle(Color.changeColor(pnl))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
             if lotCount > 1 {
@@ -513,6 +585,160 @@ struct LotRow: View {
     }
 }
 
+// MARK: - 賣出持倉視圖
+struct SellHoldingView: View {
+    let holding: StockHolding
+    let quote: StockQuote?
+
+    @StateObject private var persistence = PersistenceService.shared
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var sharesText = ""
+    @State private var priceText = ""
+    @State private var sellDate = Date()
+    @State private var depositAccountId: UUID?
+
+    private var currency: Currency { Currency.from(market: holding.market) }
+
+    private var cashAccounts: [Account] {
+        persistence.activeAccounts.filter { $0.type == .cash }
+    }
+
+    private var currentPrice: Double { quote?.currentPrice ?? holding.purchasePrice }
+
+    private var shares: Int { Int(sharesText) ?? 0 }
+    private var price: Double { Double(priceText) ?? 0 }
+
+    private var isValid: Bool {
+        shares > 0 && shares <= holding.shares && price > 0
+    }
+
+    /// 與 PersistenceService 相同的 FIFO 規則，只作即時預覽
+    private var estimatedCostBasis: Double {
+        var remaining = shares
+        var cost = 0.0
+        for lot in holding.lots.sorted(by: { $0.purchaseDate < $1.purchaseDate }) where remaining > 0 {
+            let take = min(lot.shares, remaining)
+            cost += Double(take) * lot.purchasePrice
+            remaining -= take
+        }
+        return cost
+    }
+
+    private var proceeds: Double { Double(shares) * price }
+
+    private var realizedPnL: Double { proceeds - estimatedCostBasis }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("持倉") {
+                    LabeledContent("股票", value: "\(holding.symbol) · \(holding.name)")
+                    LabeledContent("持有股數", value: "\(holding.shares) 股")
+                    LabeledContent("現價", value: currentPrice.moneyString(currency: currency))
+                }
+
+                Section("賣出資料") {
+                    HStack {
+                        Text("賣出股數")
+                        Spacer()
+                        TextField("0", text: $sharesText)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.numberPad)
+                            .frame(maxWidth: 100)
+                        Button("全部") {
+                            sharesText = "\(holding.shares)"
+                        }
+                        .font(.caption.bold())
+                        .disabled(holding.shares == 0)
+                    }
+
+                    HStack {
+                        Text("賣出價 (\(currency.symbol))")
+                        Spacer()
+                        TextField("0.00", text: $priceText)
+                            .multilineTextAlignment(.trailing)
+                            .keyboardType(.decimalPad)
+                            .frame(maxWidth: 140)
+                    }
+
+                    DatePicker("賣出日期", selection: $sellDate, displayedComponents: .date)
+
+                    if shares > holding.shares {
+                        Text("超過持有股數（最多 \(holding.shares) 股）")
+                            .font(.caption)
+                            .foregroundStyle(.loss)
+                    }
+                }
+
+                Section("存入帳戶") {
+                    if cashAccounts.isEmpty {
+                        Text("尚未建立現金帳戶，確認賣出時會自動建立「現金」帳戶（\(persistence.baseCurrency.code)）並存入所得。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("存入", selection: $depositAccountId) {
+                            ForEach(cashAccounts) { account in
+                                Text("\(account.name)（\(account.currency.code)）")
+                                    .tag(Optional(account.id))
+                            }
+                        }
+                        Text("賣出所得以 \(currency.code) 記入，並按帳戶幣種換算；記錄為轉帳，不計入收入。")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Section("結算") {
+                    LabeledContent("賣出所得", value: proceeds.moneyString(currency: currency))
+                    LabeledContent("已實現盈虧") {
+                        Text("\(realizedPnL >= 0 ? "+" : "")\(realizedPnL.moneyString(currency: currency))")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(Color.changeColor(realizedPnL))
+                    }
+                    LabeledContent("買入成本 (FIFO)", value: estimatedCostBasis.moneyString(currency: currency))
+                    if isValid {
+                        LabeledContent("賣出後剩餘", value: "\(holding.shares - shares) 股")
+                    }
+                }
+
+                Section {
+                    Text("賣出會按買入日期先進先出扣減批次，全部賣清後自動移除該持倉。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("賣出持倉")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("確認賣出") { confirmSell() }
+                        .disabled(!isValid)
+                        .bold()
+                }
+            }
+            .onAppear {
+                if priceText.isEmpty {
+                    priceText = String(format: "%.2f", currentPrice)
+                }
+                if depositAccountId == nil {
+                    depositAccountId = cashAccounts.first?.id
+                }
+            }
+        }
+    }
+
+    private func confirmSell() {
+        guard isValid else { return }
+        persistence.sellShares(of: holding.id, shares: shares, price: price, date: sellDate,
+                               depositAccountId: depositAccountId)
+        dismiss()
+    }
+}
+
 // MARK: - 添加持倉視圖
 struct AddHoldingView: View {
     @StateObject private var persistence = PersistenceService.shared
@@ -525,6 +751,8 @@ struct AddHoldingView: View {
     @State private var purchaseDate = Date()
     @State private var customSymbol = ""
     @State private var customName = ""
+    /// 上次自動填入的名稱，換股時要一併清掉，免得新代碼配舊股名存進資料
+    @State private var autoFilledName: String?
     @State private var market: StockHolding.StockMarket = .us
     @State private var isCustom = false
 
@@ -532,6 +760,39 @@ struct AddHoldingView: View {
     @State private var isLookingUp = false
     @State private var lookupResult: StockQuote?
     @State private var lookupError: String?
+    @FocusState private var isSymbolFocused: Bool
+
+    /// 輸入代碼時即時比對股票資料庫，讓使用者直接揀選而不用記全碼
+    private var symbolSuggestions: [StockInfo] {
+        let raw = customSymbol.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !raw.isEmpty else { return [] }
+        let bareQuery = raw.replacingOccurrences(of: ".HK", with: "")
+        guard !bareQuery.isEmpty else { return [] }
+
+        let matches = StockDatabase.allStocks.filter { stock in
+            let symbol = stock.symbol.uppercased()
+            let bare = symbol.replacingOccurrences(of: ".HK", with: "")
+            return bare.hasPrefix(bareQuery)
+                || bare.contains(bareQuery)
+                || stock.name.contains(customSymbol.trimmingCharacters(in: .whitespaces))
+        }
+
+        return Array(matches
+            .sorted { a, b in
+                let aBare = a.symbol.uppercased().replacingOccurrences(of: ".HK", with: "")
+                let bBare = b.symbol.uppercased().replacingOccurrences(of: ".HK", with: "")
+                let aPrefix = aBare.hasPrefix(bareQuery)
+                let bPrefix = bBare.hasPrefix(bareQuery)
+                if aPrefix != bPrefix { return aPrefix }
+                return aBare < bBare
+            }
+            .prefix(6))
+    }
+
+    /// 已查到報價時收起建議，避免與結果卡重複
+    private var showSymbolSuggestions: Bool {
+        !symbolSuggestions.isEmpty && lookupResult?.symbol.uppercased() != normalizedSymbol.uppercased()
+    }
 
     var searchResults: [StockInfo] {
         if searchText.isEmpty {
@@ -550,6 +811,7 @@ struct AddHoldingView: View {
                         TextField("股票代碼 (如 AAPL 或 0700.HK)", text: $customSymbol)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
+                            .focused($isSymbolFocused)
                             .onChange(of: customSymbol) { _ in
                                 market = detectedMarket
                                 // 代碼真的改了才丟掉上一次的查價結果
@@ -557,7 +819,47 @@ struct AddHoldingView: View {
                                     lookupResult = nil
                                     lookupError = nil
                                 }
+                                if customName == autoFilledName {
+                                    customName = ""
+                                    autoFilledName = nil
+                                }
                             }
+
+                        // 輸入時即時列出相符股票，揀選後自動填代碼、名稱與市場
+                        if showSymbolSuggestions {
+                            VStack(spacing: 0) {
+                                ForEach(symbolSuggestions) { stock in
+                                    Button {
+                                        selectSuggestion(stock)
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Text(stock.symbol)
+                                                .font(.subheadline.bold())
+                                            Text(stock.market.flag)
+                                                .font(.caption2)
+                                            Text(stock.name)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            if stock.dividendYield > 0 {
+                                                Text(stock.dividendYield.yieldPercent())
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.financePrimary)
+                                            }
+                                        }
+                                        .contentShape(Rectangle())
+                                        .padding(.vertical, 6)
+                                    }
+                                    .foregroundStyle(.primary)
+
+                                    if stock.id != symbolSuggestions.last?.id {
+                                        Divider()
+                                    }
+                                }
+                            }
+                        }
+
                         TextField("股票名稱（查價後自動填入）", text: $customName)
 
                         // 市場由代碼自動識別，手選只會與實際查價的市場矛盾
@@ -781,11 +1083,27 @@ struct AddHoldingView: View {
         customSymbol = symbol
         market = detectedMarket
         lookupResult = quote
-        if customName.isEmpty { customName = quote.name }
+        if customName.isEmpty {
+            customName = quote.name
+            autoFilledName = quote.name
+        }
         if purchasePrice.isEmpty { purchasePrice = String(format: "%.2f", quote.currentPrice) }
         // 寫入快取，新增完成後市值與總資產立即就是最新價
         StockService.shared.cacheHoldingQuotes([quote])
         Haptics.success()
+    }
+
+    /// 從建議列揀選股票：填好代碼、名稱與市場，並立即查價
+    private func selectSuggestion(_ stock: StockInfo) {
+        isSymbolFocused = false
+        customSymbol = stock.symbol
+        customName = stock.name
+        autoFilledName = stock.name
+        market = stock.market
+        lookupResult = nil
+        lookupError = nil
+        Haptics.impact()
+        Task { await lookupQuote() }
     }
 
     private func saveHolding() {

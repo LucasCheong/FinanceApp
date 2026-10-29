@@ -391,6 +391,34 @@ struct StockHolding: Identifiable, Codable {
     }
 }
 
+// MARK: - 股票賣出記錄
+/// 一次賣出的成交記錄。成本按先進先出（FIFO）計，已實現盈虧以賣出所得減成本得出
+struct StockSale: Identifiable, Codable {
+    var id: UUID = UUID()
+    var date: Date
+    var symbol: String
+    var name: String
+    var market: StockHolding.StockMarket
+    var shares: Int
+    /// 賣出價（以市場幣種計）
+    var sellPrice: Double
+    /// 賣出部分的買入成本（以市場幣種計）
+    var costBasis: Double
+
+    /// 市場幣種
+    var currency: Currency { Currency.from(market: market) }
+
+    /// 賣出所得
+    var proceeds: Double { Double(shares) * sellPrice }
+
+    /// 已實現盈虧
+    var realizedPnL: Double { proceeds - costBasis }
+
+    var realizedPnLPercent: Double {
+        costBasis > 0 ? (realizedPnL / costBasis) * 100 : 0
+    }
+}
+
 // MARK: - 股票報價模型
 struct StockQuote: Identifiable, Codable {
     var id: String { symbol }

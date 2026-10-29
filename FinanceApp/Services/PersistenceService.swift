@@ -11,6 +11,7 @@ final class PersistenceService: ObservableObject {
     // 文件名
     private let transactionsFile = "transactions.json"
     private let holdingsFile = "holdings.json"
+    private let stockSalesFile = "stock_sales.json"
     private let invoicesFile = "invoices.json"
     private let dividendsFile = "dividends.json"
     private let wealthSnapshotsFile = "wealth_snapshots.json"
@@ -25,6 +26,7 @@ final class PersistenceService: ObservableObject {
     // 發布的數據
     @Published var transactions: [Transaction] = []
     @Published var holdings: [StockHolding] = []
+    @Published var stockSales: [StockSale] = []
     @Published var invoices: [Invoice] = []
     @Published var dividendPositions: [DividendPosition] = []
     @Published var wealthSnapshots: [WealthSnapshot] = []
@@ -513,6 +515,22 @@ final class PersistenceService: ObservableObject {
         }.sorted { $0.amount > $1.amount }
     }
 
+    /// 指定時段內的歷史支出合計與筆數。只供分析頁顯示，不參與任何帳戶餘額計算。
+    func historicalExpenseSummary(year: Int, months: [Int]) -> (amount: Double, count: Int) {
+        let calendar = Calendar.current
+        var amount = 0.0
+        var count = 0
+        for tx in transactions
+        where tx.type == .expense
+            && tx.isHistoricalExpense == true
+            && calendar.component(.year, from: tx.date) == year
+            && months.contains(calendar.component(.month, from: tx.date)) {
+            amount += ExchangeRateProvider.convert(tx.amount, from: tx.currency, to: baseCurrency)
+            count += 1
+        }
+        return (amount, count)
+    }
+
     // MARK: - 交易記錄
     func addTransaction(_ transaction: Transaction) {
         transactions.insert(transaction, at: 0)
@@ -678,6 +696,96 @@ final class PersistenceService: ObservableObject {
         holdings = updated
         saveHoldings()
         Haptics.warning()
+    }
+
+    /// 賣出持倉。按買入日期先進先出扣減批次，全部賣清後自動移除持倉，
+    /// 成交記錄寫入 stock_sales.json 以便日後核對已實現盈虧。
+    /// 賣出所得會自動存入指定現金帳戶（記為轉帳，不計入收入）；
+    /// 未指定或帳戶已刪除時，沿用第一個現金帳戶，沒有就建立「現金」帳戶。
+    @discardableResult
+    func sellShares(of holdingId: UUID, shares: Int, price: Double, date: Date,
+                    depositAccountId: UUID? = nil) -> StockSale? {
+        guard shares > 0, price > 0,
+              let index = holdings.firstIndex(where: { $0.id == holdingId }),
+              holdings[index].shares >= shares else { return nil }
+
+        let sold = holdings[index]
+        var remaining = shares
+        var costBasis = 0.0
+        var keptLots: [StockHolding.Lot] = []
+
+        for var lot in sold.lots.sorted(by: { $0.purchaseDate < $1.purchaseDate }) {
+            guard remaining > 0 else {
+                keptLots.append(lot)
+                continue
+            }
+            let take = min(lot.shares, remaining)
+            costBasis += Double(take) * lot.purchasePrice
+            remaining -= take
+            lot.shares -= take
+            if lot.shares > 0 { keptLots.append(lot) }
+        }
+
+        var updated = holdings
+        updated[index].lots = keptLots
+        if updated[index].lots.isEmpty {
+            updated.remove(at: index)
+        }
+        holdings = updated
+        saveHoldings()
+
+        let sale = StockSale(
+            date: date,
+            symbol: sold.symbol,
+            name: sold.name,
+            market: sold.market,
+            shares: shares,
+            sellPrice: price,
+            costBasis: costBasis
+        )
+        stockSales.insert(sale, at: 0)
+        saveStockSales()
+
+        let depositAccount = resolveCashDepositAccount(preferred: depositAccountId)
+        let transfer = Transaction(
+            date: date,
+            amount: sale.proceeds,
+            type: .transfer,
+            category: "股票賣出",
+            note: "賣出 \(sale.symbol) \(sale.shares) 股",
+            source: .manual,
+            currency: sale.currency,
+            accountId: activeAccounts.first { $0.type == .investment }?.id,
+            transferToAccountId: depositAccount.id
+        )
+        transactions.insert(transfer, at: 0)
+        saveTransactions()
+
+        Haptics.success()
+        updateWidgetSnapshot()
+        return sale
+    }
+
+    /// 賣出所得要存入的現金帳戶：先用指定帳戶，否則第一個現金戶口，
+    /// 兩者都沒有就建立一個以基準幣種計的「現金」帳戶
+    private func resolveCashDepositAccount(preferred: UUID?) -> Account {
+        if let preferred, let account = activeAccounts.first(where: { $0.id == preferred && $0.type == .cash }) {
+            return account
+        }
+        if let existing = activeAccounts.first(where: { $0.type == .cash }) {
+            return existing
+        }
+        let account = Account(name: "現金", type: .cash, currency: baseCurrency)
+        accounts.append(account)
+        saveAccounts()
+        return account
+    }
+
+    /// 已實現盈虧合計（基準幣種）
+    var realizedPnLTotal: Double {
+        stockSales.reduce(0.0) { total, sale in
+            total + ExchangeRateProvider.convert(sale.realizedPnL, from: sale.currency, to: baseCurrency)
+        }
     }
 
     // MARK: - 發票
@@ -1143,6 +1251,10 @@ final class PersistenceService: ObservableObject {
         save(holdings, to: holdingsFile)
     }
 
+    private func saveStockSales() {
+        save(stockSales, to: stockSalesFile)
+    }
+
     private func saveInvoices() {
         save(invoices, to: invoicesFile)
     }
@@ -1215,6 +1327,7 @@ final class PersistenceService: ObservableObject {
         holdings = mergeHoldingsBySymbol(rawHoldings)
         // 舊版資料同一 symbol 可能有多筆，合併後立即寫回以免每次載入都重跞
         if holdings.count != rawHoldings.count { saveHoldings() }
+        stockSales = load(stockSalesFile) ?? []
         invoices = load(invoicesFile) ?? []
         dividendPositions = load(dividendsFile) ?? []
         wealthSnapshots = load(wealthSnapshotsFile) ?? []
@@ -1315,6 +1428,8 @@ final class PersistenceService: ObservableObject {
             var priceAlerts: [PriceAlert]
             var dcaPositions: [DCAPosition]
             var accounts: [Account]
+            /// 舊版備份沒有這欄位，保持可選以維持相容
+            var stockSales: [StockSale]?
         }
     }
 
@@ -1334,7 +1449,8 @@ final class PersistenceService: ObservableObject {
                 recurringTransactions: recurringTransactions,
                 priceAlerts: priceAlerts,
                 dcaPositions: dcaPositions,
-                accounts: accounts
+                accounts: accounts,
+                stockSales: stockSales
             )
         )
         let encoder = JSONEncoder()
@@ -1376,6 +1492,7 @@ final class PersistenceService: ObservableObject {
         priceAlerts = decode("priceAlerts")
         dcaPositions = decode("dcaPositions")
         accounts = decode("accounts")
+        stockSales = decode("stockSales")
         restoreLastImportBatchFromTransactionOrder()
 
         if let code = json["baseCurrency"] as? String, let cur = Currency(rawValue: code) {
@@ -1396,6 +1513,7 @@ final class PersistenceService: ObservableObject {
         saveTransactions(); saveHoldings(); saveBudgets()
         saveCustomCategories(); saveDividends(); saveRecurring()
         savePriceAlerts(); saveDCA(); saveAccounts()
+        saveStockSales()
         NotificationManager.shared.syncCreditCardPaymentReminders(for: accounts)
         updateWidgetSnapshot()
         return transactions.count

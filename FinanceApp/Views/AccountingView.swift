@@ -444,6 +444,10 @@ struct TransactionRow: View {
                             Image(systemName: "arrow.right")
                                 .font(.caption2)
                             Text(to)
+                        } else if let to = targetAccountName {
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                            Text(to)
                         }
                         Text("·")
                         Text(transaction.date.shortDateString)

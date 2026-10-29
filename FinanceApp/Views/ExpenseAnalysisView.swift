@@ -34,6 +34,24 @@ struct ExpenseAnalysisView: View {
         }
     }
 
+    /// 當前時段包含的月份
+    private var selectedMonths: [Int] {
+        switch selectedPeriod {
+        case .month:
+            return [selectedMonth]
+        case .quarter:
+            let start = (selectedQuarter - 1) * 3 + 1
+            return Array(start...(start + 2))
+        case .year:
+            return Array(1...12)
+        }
+    }
+
+    /// 當前時段的歷史支出（已計入總支出，但不影響帳戶餘額）
+    private var historicalExpense: (amount: Double, count: Int) {
+        persistence.historicalExpenseSummary(year: selectedYear, months: selectedMonths)
+    }
+
     /// 上一期標籤
     var previousPeriodLabel: String {
         switch selectedPeriod {
@@ -179,6 +197,7 @@ struct ExpenseAnalysisView: View {
     // MARK: - 總覽卡片
     private var summaryCard: some View {
         let overview = currentOverview
+        let historical = historicalExpense
         return VStack(spacing: 12) {
             Text(overview.periodLabel)
                 .font(.headline)
@@ -238,6 +257,24 @@ struct ExpenseAnalysisView: View {
                         .font(.caption)
                         .foregroundStyle(overview.change >= 0 ? .expenseColor : .incomeColor)
                 }
+            }
+
+            // 歷史支出：只計入上述統計，不影響帳戶餘額
+            if historical.count > 0 {
+                Divider()
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text("含歷史支出 \(historical.count) 筆")
+                    Spacer()
+                    Text(historical.amount.moneyString(currency: persistence.baseCurrency))
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+                Text("歷史支出只計入統計與分析，不影響任何帳戶餘額")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity)

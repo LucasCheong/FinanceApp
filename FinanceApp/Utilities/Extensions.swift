@@ -20,13 +20,17 @@ extension Double {
 
     /// 帶幣種符號的簡潔顯示（如 "HK$1,234.56"，小數位數可在設定頁調整）
     func moneyString(currency: Currency) -> String {
+        "\(currency.symbol)\(amountString())"
+    }
+
+    /// 只顯示千分位數字，不含幣種符號。用於頁面已標明基準幣種的地方
+    func amountString() -> String {
         let decimals = UserDefaults.standard.object(forKey: "decimalPlaces") as? Int ?? 2
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.minimumFractionDigits = decimals
         formatter.maximumFractionDigits = decimals
-        let numberStr = formatter.string(from: NSNumber(value: self)) ?? "\(self)"
-        return "\(currency.symbol)\(numberStr)"
+        return formatter.string(from: NSNumber(value: self)) ?? "\(self)"
     }
 
     /// 格式化為百分比顯示
